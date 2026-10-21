@@ -1,0 +1,3 @@
+# 本机 CPU Whisper 路线；模型权重首次使用时缓存至 .data/content-models。
+faster-whisper==1.2.1
+# FunASR 依赖见 requirements-funasr.txt，安装到 .venv-funasr 后按提供方自动选环境。

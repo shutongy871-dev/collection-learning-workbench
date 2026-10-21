@@ -1,0 +1,47 @@
+{
+  "name": "collection-tidy-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "跨设备 / 跨 agent / 跨时间 / 跨 app 的社媒收藏自动整理 Agent 运行时（首期：抖音）",
+  "main": "src/learning/server.mjs",
+  "scripts": {
+    "start": "node src/learning/server.mjs",
+    "start:legacy": "node src/local-service/index.mjs",
+    "learn": "node src/learning/server.mjs",
+    "content:doctor": "node scripts/content.mjs doctor",
+    "content:plan": "node scripts/content.mjs plan",
+    "content:process": "node scripts/content.mjs process",
+    "content:vision-check": "node scripts/content.mjs vision-check",
+    "content:configure-key": "python3 scripts/configure-content-key.py",
+    "content:capture": "node scripts/capture-content.mjs",
+    "content:batch": "node scripts/content-batch.mjs",
+    "browser": "node scripts/local-browser.mjs --login",
+    "browser:background": "node scripts/local-browser.mjs --headless --defer-navigation",
+    "setup": "node scripts/setup-daily.mjs",
+    "scan": "node scripts/local-scan.mjs",
+    "plan:local": "node scripts/local-plan.mjs",
+    "run:local": "node scripts/local-run.mjs",
+    "daily": "node scripts/daily.mjs --run-now",
+    "daily:status": "node scripts/daily.mjs --status",
+    "test": "node --test test/*.test.mjs",
+    "verify:nonmodel": "node scripts/check-readiness.mjs",
+    "verify:background": "node scripts/check-background-browser.mjs",
+    "verify:ui": "node scripts/check-learning-ui.mjs",
+    "diagnose": "node scripts/diagnose.mjs",
+    "release:prepare": "node scripts/prepare-github-release.mjs",
+    "install:mac": "bash scripts/install-mac.sh"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.0",
+    "proper-lockfile": "4.1.2",
+    "ts-fsrs": "5.4.2"
+  },
+  "optionalDependencies": {
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
+    "@ffprobe-installer/ffprobe": "2.1.2"
+  }
+}

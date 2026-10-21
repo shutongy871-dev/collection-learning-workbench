@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root {
+      --text: #171717;
+      --muted: #71717a;
+      --border: rgba(23, 23, 23, 0.12);
+      --brand: #0ab861;
+      --danger: #e8463a;
+      --surface-muted: #f4f4f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 300px;
+      margin: 0;
+      padding: 16px;
+      font: 13px/1.5 -apple-system, "PingFang SC", system-ui, sans-serif;
+      color: var(--text);
+    }
+    h1 { font-size: 14px; margin: 0 0 12px; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .label { color: var(--muted); }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--danger); margin-right: 6px; }
+    .dot.ok { background: var(--brand); }
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.primary { background: var(--brand); color: #fff; border-color: transparent; }
+    input {
+      width: 100%;
+      padding: 7px 10px;
+      margin-top: 4px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+    }
+    .section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>收藏整理 Agent</h1>
+
+  <div class="row">
+    <span class="label">控制面服务</span>
+    <span><span class="dot" id="dot"></span><span id="status">检测中…</span></span>
+  </div>
+  <div class="row">
+    <span class="label">设备 ID</span>
+    <span id="deviceId">-</span>
+  </div>
+
+  <div class="hint">当前为本地验证入口，仅适配抖音。全量未分类扫描及云端执行尚未完成。</div>
+  <div class="hint" id="taskState" role="status"></div>
+  <button class="primary" id="runNow">检查全量整理流程</button>
+  <button id="openPage">打开抖音收藏页</button>
+
+  <div class="section">
+    <div class="label">飞书机器人 Webhook</div>
+    <input id="webhook" type="text" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
+    <button id="saveWebhook">保存并发送测试消息</button>
+    <div class="hint" id="notifyState" role="status">用于登录提醒和结果通知。暂不支持在群内回复分类指令。</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

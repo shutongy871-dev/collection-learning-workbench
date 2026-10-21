@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f8f7f3">
+  <title>拾光 · 收藏学习工作台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <div class="workspace">
+    <header class="topbar"><div class="breadcrumb">我的空间 <span>/</span> <strong id="crumb">今日学习</strong></div><div class="top-actions"><span id="today-date"></span><button id="refresh" class="quiet" title="手动同步抖音收藏、分类并更新学习库">↻ 同步并分类</button><details class="account-menu"><summary class="avatar" aria-label="抖音账号">我</summary><div class="account-panel"><p id="account-state">登录状态待核验</p><button id="account-login" class="secondary">登录抖音</button><button id="account-check" class="secondary">检查登录</button></div></details></div></header>
+    <p id="collection-sync-status" role="status" aria-live="polite" style="margin:12px 24px;color:#786a88;font-size:12px" hidden></p>
+    <main id="main" tabindex="-1"><div id="loading" class="loading"><span class="brand-mark">✳</span><h1>正在打开你的收藏空间</h1><p>整理本地收藏与学习记录…</p></div></main>
+    <footer>拾光 · 让每一次收藏，都有回响。<span>学习记录保存在这台电脑</span></footer>
+  </div>
+  <dialog id="detail" class="detail-dialog" aria-labelledby="detail-title"></dialog>
+  <dialog id="quiz" class="quiz-dialog" aria-labelledby="quiz-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>
