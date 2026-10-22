@@ -413,7 +413,7 @@ function syncError(code = "") {
 function renderSync(job) {
   const active = job.status === "running" || job.active === true;
   $("#refresh").disabled = active;
-  $("#refresh").textContent = active ? "↻ 正在同步分类…" : "↻ 同步并分类";
+  $("#refresh").textContent = `${active ? "↻ 正在同步分类…" : "↻ 同步并分类"}（预计用时2分钟，请耐心等待）`;
 }
 async function loadSync() {
   clearTimeout(syncTimer);
