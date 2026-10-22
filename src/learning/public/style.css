@@ -43,9 +43,9 @@ dialog{border:1px solid #e0d8e8;padding:0;box-shadow:0 20px 100px #2f1d4330;colo
 .account-menu{position:relative}
 .account-menu summary{cursor:pointer;list-style:none}
 .account-menu summary::-webkit-details-marker{display:none}
-.account-panel{position:absolute;right:0;top:44px;width:260px;max-width:85vw;padding:18px;background:white;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #43345220;z-index:10}
-.account-panel p{margin-bottom:12px;overflow-wrap:anywhere}
-.account-panel button{margin:4px 0}
+.account-panel{position:absolute;right:0;top:44px;width:260px;max-width:85vw;padding:18px;display:grid;gap:10px;background:white;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #43345220;z-index:10}
+.account-panel p{margin-bottom:4px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}
+.account-panel button{width:100%;min-height:42px;margin:0}
 .model-form{display:grid;gap:14px}
 .model-form label{display:grid;gap:6px;font-size:13px}
 .model-form [hidden]{display:none}

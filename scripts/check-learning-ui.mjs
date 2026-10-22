@@ -115,13 +115,24 @@ try {
   await page.getByRole("heading", { name: "让收藏，成为你的收获。" }).waitFor();
   await check("右上角账号入口可发起登录、核验昵称并在刷新后保留", async () => {
     await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.locator("#account-state").filter({ hasText: "尚未确认抖音登录" }).waitFor();
+    const buttons = await page.locator(".account-panel button").evaluateAll(elements =>
+      elements.map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
+    assert.equal(buttons.length, 3);
+    for (const [i, rect] of buttons.entries()) {
+      assert.ok(rect.height >= 42);
+      assert.equal(rect.x, buttons[0].x);
+      assert.equal(rect.width, buttons[0].width);
+      if (i) assert.ok(rect.y - buttons[i - 1].y - buttons[i - 1].height >= 10);
+    }
+    await page.locator(".account-panel").screenshot({ path: join(output, "account-menu.png") });
     await page.getByRole("button", { name: "登录抖音", exact: true }).click();
     await page.locator("#account-state").filter({ hasText: "请在专用窗口扫码" }).waitFor();
     await page.getByRole("button", { name: "检查登录", exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 登录已核验" }).waitFor();
+    await page.locator("#account-state").filter({ hasText: "测试使用者 · 上次检查已登录" }).waitFor();
     await page.reload();
     await page.getByLabel("抖音账号", { exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 登录已核验" }).waitFor();
+    await page.locator("#account-state").filter({ hasText: "测试使用者 · 上次检查已登录" }).waitFor();
     await page.getByLabel("抖音账号", { exact: true }).click();
   });
   await check("首页只保留刷题入口，不展示收藏标题或心得", async () => {

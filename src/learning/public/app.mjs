@@ -445,8 +445,10 @@ void loadSync();
 function renderAccount(account) {
   const verified = account.status === "verified";
   $("#account-state").textContent = verified ?
-    `${account.nickname || "抖音账号"} · 登录已核验（${dateText(account.checkedAt)}）` :
-    account.status === "login_pending" ? "请在专用窗口扫码，完成后点击检查登录。" : "登录状态待核验";
+    `${account.nickname || "抖音账号"} · 上次检查已登录（${dateText(account.checkedAt)}）` :
+    account.status === "login_pending" ? "请在专用窗口扫码，完成后点击检查登录。" :
+    account.status === "unavailable" ? "暂时无法读取登录状态，请确认本地服务正在运行。" :
+    "尚未确认抖音登录，可点击「检查登录」。";
   $(".account-menu summary").textContent = verified ? (account.nickname || "我").slice(0, 1) : "我";
   $(".account-menu summary").title = $("#account-state").textContent;
 }
@@ -454,19 +456,20 @@ async function accountAction(path) {
   $("#account-login").disabled = $("#account-check").disabled = true;
   try { renderAccount(await api(path, {})); }
   catch {
-    renderAccount(await api("account").catch(() => ({ status: "unverified" })));
+    renderAccount(await api("account").catch(() => ({ status: "unavailable" })));
     toast("无法完成账号操作，请确认专用登录窗口已就绪，且没有其他收藏任务正在运行。");
   }
   finally { $("#account-login").disabled = $("#account-check").disabled = false; }
 }
 $("#account-login").addEventListener("click", () => void accountAction("account/login"));
 $("#account-check").addEventListener("click", () => void accountAction("account/check"));
-api("account").then(renderAccount).catch(() => {});
+api("account").then(renderAccount).catch(() => renderAccount({ status: "unavailable" }));
 const modelButton = document.createElement("button");
 modelButton.type = "button";
 modelButton.className = "secondary";
 modelButton.id = "model-open";
 modelButton.textContent = "模型配置";
+modelButton.title = "配置出题模型、API 地址、密钥和费用；保存后开始准备题目";
 $(".account-panel").append(modelButton);
 let modelConfiguration;
 function fillModelFields(settings) {
