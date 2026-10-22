@@ -197,6 +197,26 @@ try {
     await page.getByLabel("趋势收藏夹").selectOption("");
     assert.equal(await page.locator(".trend-panel .chart").count(), 1);
   });
+  await check("电脑首屏完整显示学习操作、统计和三张图，不需要上下滚动", async () => {
+    for (const [width, height] of [[1440, 900], [1440, 800], [1366, 668], [1280, 720], [1920, 900]]) {
+      await page.setViewportSize({ width, height });
+      await page.waitForFunction(() => document.querySelector(".chart")?.viewBox.baseVal.height ===
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--collection-chart-height")));
+      const fit = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollHeight > innerHeight,
+        heroHeight: document.querySelector(".hero").getBoundingClientRect().height,
+        panelsVisible: [...document.querySelectorAll(".insights-grid>.panel")].every(el => {
+          const box = el.getBoundingClientRect();
+          return box.top >= 0 && box.bottom <= innerHeight && getComputedStyle(el).display !== "none";
+        })
+      }));
+      assert.ok(!fit.scroll && fit.panelsVisible && fit.heroHeight <= 96, `${width}×${height}: ${JSON.stringify(fit)}`);
+      assert.equal(await page.getByRole("button", { name: "开始学习", exact: false }).isVisible(), true);
+    }
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await page.waitForFunction(() => document.querySelector(".chart")?.viewBox.baseVal.height === 180);
+    await page.screenshot({ path: join(output, "desktop-compact.png"), fullPage: true });
+  });
   await check("答题不展示来源标题、原收藏链接或心得", async () => {
     const item = fixtureItem, question = state.questions.find(q => q.itemKey === item.key);
     const current = await (await fetch(`${origin}/api/state`)).json();

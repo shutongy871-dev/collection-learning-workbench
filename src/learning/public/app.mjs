@@ -55,7 +55,9 @@ function chart(items, compact = false) {
   const mode = compact ? "total" : chartMode;
   const values = series.map(s => mode === "total" ? s.total : s.added + s.baseline);
   const max = Math.max(2, Math.ceil(Math.max(...values, 1) / 2) * 2);
-  const width = 440, height = 230, left = 47, right = 12, top = 15, bottom = 32;
+  const width = 440, height = compact ?
+    parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--collection-chart-height")) || 230 : 230;
+  const left = 47, right = 12, top = 15, bottom = 32;
   const pw = width - left - right, ph = height - top - bottom;
   const x = idx => left + (series.length === 1 ? pw / 2 : idx * pw / (series.length - 1));
   const y = n => top + ph - n / max * ph;
