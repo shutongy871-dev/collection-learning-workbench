@@ -8,6 +8,7 @@ import { learnFolderRules, diffFolderRules } from "./folder-rules.mjs";
 import { defaultDailyConfig, dailyLedgerKey, runtimeEnvironment } from "./runtime-config.mjs";
 import { unique, provePages } from "./local-scan.mjs";
 import { reuseBackgroundBrowser, closeBrowserChild } from "./browser-session.mjs";
+import { nextCheckpoint, mergePending } from "./incremental-policy.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const collectionDataDir = resolve(process.env.COLLECTION_DATA_DIR || resolve(root, ".data"));
@@ -35,6 +36,13 @@ export async function initializeDaily(dataDir, now = new Date()) {
 export async function refreshDailyClassification(snapshot, accountId, dataDir, runDir, options = {}) {
   // 从证明完整的成员页训练，不能信任未校验的缓存items。
   buildDailyPlan(snapshot, [], accountId);
+  if (!snapshot.complete && !snapshot.unclassified.length) {
+    const rules = await readJson(resolve(dataDir, "rules.json"), []);
+    const plan = buildDailyPlan(snapshot, rules, accountId);
+    const report = { enabled: rules.filter(r => r.enabled).length, disabled: [], changes: [], skipped: true };
+    await putJson(resolve(runDir, "classification-plan.json"), plan);
+    return { plan, report };
+  }
   const rules = learnFolderRules(snapshot.folders.map(f => ({ ...f,
     items: unique(provePages(f.pages), "items") })), options);
   // 先验证账号、全量分页、未分类差集；失败时不发布新规则，也不回退旧规则执行。
@@ -109,6 +117,23 @@ async function main() {
     ledger = await readJson(resolve(base, "ledger.json"), {});
     due = dailyDue(config, ledger);
     if (mode === "--tick" && !due) return;
+    const checkpointPath = resolve(base, "sync-checkpoint.json");
+    let checkpoint = await readJson(checkpointPath, null);
+    if (!checkpoint) {
+      // 升级后复用最近成功运行的完整读回证据，避免仅为了建立锚点重扫一遍。
+      const previousRun = await readJson(resolve(base, "latest.json"), null);
+      if (["completed", "partial"].includes(previousRun?.status) && previousRun.accountId === config.accountId) {
+        const historical = await readJson(resolve(previousRun.directory, "final-snapshot.json"), null) ??
+          (previousRun.verified === 0 ? await readJson(resolve(previousRun.directory, "snapshot.json"), null) : null);
+        if (historical?.complete) {
+          try {
+            buildDailyPlan(historical, [], config.accountId);
+            checkpoint = nextCheckpoint(null, historical, historical.unclassified, new Date(historical.at));
+          } catch { /* 旧证据不完整时首次仍全量读取。 */ }
+          if (checkpoint) await putJson(checkpointPath, checkpoint);
+        }
+      }
+    }
     const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
     runDir = resolve(base, "runs", id);
     await mkdir(runDir, { recursive: true, mode: 0o700 });
@@ -160,6 +185,7 @@ async function main() {
         const child = spawn(process.execPath, [`scripts/${script}.mjs`, ...args], {
           cwd: root, env: { ...childEnv, COLLECTION_DATA_DIR: collectionDataDir,
             COLLECTION_RUN_DIR: runDir, COLLECTION_ACCOUNT_ID: config.accountId,
+            COLLECTION_INCREMENTAL_CHECKPOINT: checkpointPath,
             COLLECTION_BROWSER_ENDPOINT: endpoint },
           stdio: ["ignore", output.fd, output.fd]
         });
@@ -171,7 +197,7 @@ async function main() {
         await exited;
       } finally { await output.close(); }
     };
-    await step("local-scan");
+    await step("local-scan", "snapshot.json", ...(process.argv.includes("--full") ? ["--full"] : []));
     let snapshot = await readJson(resolve(runDir, "snapshot.json"));
     if (String(snapshot.account?.id) !== String(config.accountId)) {
       throw new Error("account_changed:如需改用当前登录账号，请先运行 npm run setup");
@@ -191,28 +217,34 @@ async function main() {
           await putJson(resolve(base, "config.json"), config);
         }
       }
-      await step("local-scan"); // 创建后完整复扫，使用平台真实ID与最新成员。
+      await step("local-scan", "snapshot.json", "--full"); // 创建后完整复扫，使用平台真实ID与最新成员。
       snapshot = await readJson(resolve(runDir, "snapshot.json"));
     }
     const { plan, report } = await refreshDailyClassification(snapshot, config.accountId, base, runDir,
       { useDefaults: config.defaultFoldersSetup?.accountId === config.accountId });
     run.ruleRefresh = { enabled: report.enabled, disabled: report.disabled.length, changes: report.changes.length };
     run.scanned = snapshot.favorites.length;
+    run.syncMode = snapshot.complete ? "full" : "incremental";
+    run.favoritePages = snapshot.favoritePages.length;
     run.unclassifiedBefore = plan.total;
     run.pending = plan.unresolved.length;
     run.verified = 0;
+    let state;
     if (plan.decisions.length) {
       await step("local-run");
-      const state = await readJson(resolve(runDir, "run-state.json"));
+      state = await readJson(resolve(runDir, "run-state.json"));
       run.verified = Object.values(state.entries).filter(e => e.status === "verified").length;
-      await step("local-scan", "final-snapshot.json");
       const final = await readJson(resolve(runDir, "final-snapshot.json"));
       if (final.account?.id !== snapshot.account.id) throw new Error("final_account_mismatch");
       const locations = new Map(final.folders.map(f => [f.id, new Set(f.items.map(i => i.id))]));
-      const missing = plan.decisions.filter(d => !locations.get(d.folderId)?.has(d.itemId));
+      const missing = plan.decisions.filter(d => state.entries[d.itemId]?.status !== "already_filed_elsewhere" &&
+        !locations.get(d.folderId)?.has(d.itemId));
       if (missing.length) throw new Error("final_destination_readback_missing");
-      run.pending = final.unclassified.length;
     }
+    const pending = mergePending(checkpoint, snapshot, plan, state);
+    run.pending = pending.length;
+    // 只有扫描成功且所有提交已读回才推进边界；blocked运行不修改成功检查点。
+    await putJson(checkpointPath, nextCheckpoint(checkpoint, snapshot, pending));
     run.status = run.pending ? "partial" : "completed";
   } catch (e) {
     if (!run) throw e;

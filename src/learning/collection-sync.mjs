@@ -79,7 +79,8 @@ export function collectionSync({ dataDir, store, runner = runClassification, onC
           await store.mutate(async s => Object.assign(s, await importCollections(dataDir, s)));
           const state = await store.read();
           Object.assign(job, { status: result.status, scanned: result.scanned ?? 0, classified: result.verified ?? 0,
-            pending: result.pending ?? 0, imported: state.items.filter(i => !before.has(i.key)).length });
+            pending: result.pending ?? 0, syncMode: result.syncMode, favoritePages: result.favoritePages,
+            imported: state.items.filter(i => !before.has(i.key)).length });
           await onComplete();
         }
       } catch (e) { job.status = "blocked"; job.error = e.message; }

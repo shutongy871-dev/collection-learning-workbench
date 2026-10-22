@@ -427,7 +427,11 @@ async function loadSync() {
       syncObservedActive = false;
       await reload();
       void loadAccount();
-      toast(["completed", "partial"].includes(job.status) ? "收藏已同步并分类，学习库已更新" : syncError(job.error));
+      const success = ["completed", "partial"].includes(job.status);
+      const message = job.syncMode === "incremental" ?
+        (job.imported ? `已同步 ${job.imported} 条新增收藏，归类 ${job.classified} 条` :
+          "没有新增收藏，学习库已同步") : "收藏已同步并分类，学习库已更新";
+      toast(success ? `${message}${job.pending ? `；${job.pending} 条待分类` : ""}` : syncError(job.error));
     }
   } catch {
     syncTimer = setTimeout(() => void loadSync(), 4000);

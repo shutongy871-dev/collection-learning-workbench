@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserEndpoint, connectBrowser } from "./browser-session.mjs";
 import { recordAccountLogin, recordAccountFailure } from "./account-status.mjs";
+import { incrementalReady, findBoundary, newCandidates } from "./incremental-policy.mjs";
 
 export const browserDir = fileURLToPath(new URL("../.data/local-browser/", import.meta.url));
 // 每日运行独立存证，连接和登录目录固定；保留原始人工验收证据。
@@ -181,7 +182,7 @@ export function collect(records, path) {
 export function unique(pages, field) {
   return [...new Map(pages.flatMap(p => p[field] ?? []).map(x => [x.id, x])).values()];
 }
-function paginationState(pages) {
+export function paginationState(pages) {
   const byCursor = new Map(pages.map(p => [String(p.query.cursor ?? p.body.cursor), p]));
   const chain = [];
   let cursor = "0";
@@ -208,7 +209,7 @@ export function provePages(pages) {
 }
 const memberPages = (records, id) => collect(records, "/collects/video/list/")
   .filter(r => (r.query.collects_id ?? r.body.collects_id) === id);
-export async function finishPages(page, capture, path, select, { responseTimeout = 12_000 } = {}) {
+export async function finishPages(page, capture, path, select, { responseTimeout = 12_000, stopWhen } = {}) {
   for (;;) {
     await capture.flush();
     const pages = select();
@@ -217,6 +218,7 @@ export async function finishPages(page, capture, path, select, { responseTimeout
     const { chain, next } = paginationState(pages);
     if (next === null) return chain;
     if (!chain.length) throw new Error("incomplete_page:0");
+    if (stopWhen?.(chain)) return chain;
     const previous = chain.at(-1);
     const folder = previous.query.collects_id ?? previous.body.collects_id;
     const lastItem = previous.items?.at(-1);
@@ -437,9 +439,30 @@ async function main() {
     if (folders.some(f => f.owner !== account.id)) throw new Error("account_scope_mismatch");
     await save("folder-snapshot.json", { at: new Date().toISOString(), folders, pages });
     console.log(JSON.stringify({ phase: "folders", folders }));
+    let checkpoint;
+    if (process.env.COLLECTION_INCREMENTAL_CHECKPOINT && !process.argv.includes("--full")) {
+      try { checkpoint = JSON.parse(await readFile(process.env.COLLECTION_INCREMENTAL_CHECKPOINT, "utf8")); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    const incremental = incrementalReady(checkpoint, account.id, folders);
+    // 先读取收藏头部。无新增时不访问任何收藏夹详情。
+    await trigger(page, "/aweme/listcollection/", () => page.getByRole("tab", { name: "视频", exact: true }).click());
+    const favoritePages = await finishPages(page, capture, "/aweme/listcollection/",
+      () => collect(capture.records, "/aweme/listcollection/"), {
+        stopWhen: incremental ? chain => Boolean(findBoundary(unique(chain, "items"), checkpoint)) : undefined
+      });
+    const favorites = unique(favoritePages, "items");
+    if (favoritePages.some(p => !Array.isArray(p.items) || p.items.some(i => typeof i.id !== "string" || !i.id)))
+      throw new Error("favorite_payload_invalid");
+    const boundary = incremental ? findBoundary(favorites, checkpoint) : null;
+    // 未找到稳定锚点时finishPages已经读到末页，按完整扫描处理。
+    const candidates = boundary ? newCandidates(favorites, checkpoint) : favorites;
     const members = [];
     const recoveries = {};
-    for (const folder of folders) {
+    if (candidates.length || !boundary) {
+      await page.getByRole("tab", { name: "收藏夹", exact: true }).click();
+    }
+    for (const folder of candidates.length || !boundary ? folders : []) {
       const member = await readFolderMembers({ page, capture, folder, accountId: account.id,
         onRecovery: async recovery => {
           recoveries[folder.id] = recovery;
@@ -450,19 +473,18 @@ async function main() {
         displayed: folder.total, source: member.memberSource }));
       await save("member-snapshot.json", { at: new Date().toISOString(), members, complete: members.length === folders.length });
     }
-    await trigger(page, "/aweme/listcollection/", () => page.getByRole("tab", { name: "视频", exact: true }).click());
-    const favoritePages = await finishPages(page, capture, "/aweme/listcollection/",
-      () => collect(capture.records, "/aweme/listcollection/"));
-    const favorites = unique(favoritePages, "items");
     const filed = new Set(members.flatMap(f => f.items.map(i => i.id)));
-    const unclassified = favorites.filter(i => !filed.has(i.id));
+    const unclassified = candidates.filter(i => !filed.has(i.id));
     const snapshot = { at: new Date().toISOString(), account,
-      scope: "all_readable_favorites", complete: true, folderPages: pages, folders: members,
+      scope: boundary ? "incremental_favorites" : "all_readable_favorites", complete: !boundary,
+      ...(boundary ? { incremental: { checkpoint, boundary } } : {}),
+      folderPages: pages, folders: members.length ? members : folders,
       favoritePages, favorites, unclassified,
       invalidCount: favoritePages.reduce((sum, p) => sum + (p.invalid ?? 0), 0) };
     if (!snapshot.account?.id || folders.some(f => f.owner !== snapshot.account.id)) throw new Error("account_scope_mismatch");
     await save(output, snapshot);
-    console.log(JSON.stringify({ phase: "complete", favorites: favorites.length, filed: favorites.length - unclassified.length,
+    console.log(JSON.stringify({ phase: "complete", scope: snapshot.scope, candidates: candidates.length,
+      favorites: favorites.length, filed: candidates.length - unclassified.length,
       unclassified: unclassified.length, pages: favoritePages.length }));
   } catch (error) {
     capture ??= error.capture;

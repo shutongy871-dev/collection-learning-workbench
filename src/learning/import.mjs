@@ -59,7 +59,8 @@ export async function importCollections(dataDir, previous = emptyState()) {
       if (!data?.favorites || !data.account?.id || !Number.isFinite(Date.parse(data.at))) continue;
       if (data.platform && data.platform !== "douyin") continue;
       batches.push({ platform: "douyin", accountId: String(data.account.id), at: data.at, items: data.favorites,
-        folders: data.folders ?? [], complete: data.complete === true, expected: data.expectedFavorites ?? null, origin: "snapshot" });
+        folders: data.folders ?? [], complete: data.complete === true, scope: data.scope,
+        expected: data.expectedFavorites ?? null, origin: "snapshot" });
     }
   }
   batches.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -104,7 +105,9 @@ export async function importCollections(dataDir, previous = emptyState()) {
       });
     }
     sources.set(batch.platform, { platform: batch.platform, accountId: batch.accountId, at: batch.at,
-      complete: batch.complete, expected: batch.expected, readable: batch.items.length });
+      complete: batch.complete, syncScope: batch.scope, expected: batch.expected,
+      readable: [...map.values()].filter(i => i.platform === batch.platform && i.accountId === batch.accountId).length,
+      lastRead: batch.items.length });
   }
   const items = [...map.values()].sort((a, b) => Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt) || a.key.localeCompare(b.key));
   return { ...previous, items, sources: [...sources.values()], baselineCutoffs, importedAt: new Date().toISOString() };

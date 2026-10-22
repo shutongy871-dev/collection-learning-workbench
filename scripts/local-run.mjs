@@ -1,14 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { acquireLock } from "./daily.mjs";
-import { connect, watch, trigger, openSelfPage, finishPages, collect, readFolderMembers, proveFolderMembers, unique, save, dir } from "./local-scan.mjs";
+import { buildDailyPlan } from "./daily-policy.mjs";
+import { connect, watch, trigger, openSelfPage, finishPages, collect, readFolderMembers, unique, save, dir } from "./local-scan.mjs";
 
 async function main() {
 const plan = JSON.parse(await readFile(dir + "classification-plan.json"));
 const snapshot = JSON.parse(await readFile(dir + "snapshot.json"));
 if (plan.snapshotHash !== createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") ||
-    !snapshot.complete || !plan.account?.id) throw new Error("plan_snapshot_mismatch");
-for (const folder of snapshot.folders) proveFolderMembers(folder);
+    !plan.account?.id) throw new Error("plan_snapshot_mismatch");
+buildDailyPlan(snapshot, [], plan.account.id);
 const batchSize = 20; // UI 操作批次，不是总量上限；遍历全部 decisions。
 const lock = await acquireLock(dir + "execution.lock");
 if (!lock) throw new Error("another_local_run_or_lock_recovery");
@@ -36,6 +37,7 @@ async function freshFolders() {
   } catch (e) { capture.stop(); throw e; }
 }
 const memberRecoveries = [];
+let currentMemberships = [];
 const folderMembers = (capture, folder) => readFolderMembers({
   page: verifier, capture, folder, accountId: plan.account.id,
   onRecovery: async recovery => {
@@ -49,6 +51,7 @@ async function verifyBatch(batch) {
     const folder = folders.find(f => f.id === batch.folderId);
     if (!folder) throw new Error("destination_disappeared");
     const evidence = await folderMembers(capture, folder);
+    currentMemberships = currentMemberships.map(f => f.id === evidence.id ? evidence : f);
     const ids = new Set(evidence.items.map(i => i.id));
     const evidenceFile = `verified-batch-${batch.id}.json`;
     await save(evidenceFile, { at: new Date().toISOString(), account: plan.account, batch, evidence });
@@ -125,6 +128,7 @@ try {
   try {
     for (const folder of folders) memberships.push(await folderMembers(capture, folder));
   } finally { capture.stop(); }
+  currentMemberships = memberships;
   if (plan.decisions.some(d => !folders.some(f => f.id === d.folderId))) throw new Error("planned_destination_disappeared");
   await save("preflight-memberships.json", { at: new Date().toISOString(), account: plan.account, memberships });
   const actual = new Map(memberships.flatMap(f => f.items.map(i => [i.id, f.id])));
@@ -141,13 +145,19 @@ try {
   }
   await persist();
   const captureMain = watch(page);
+  const needed = new Set(plan.decisions.filter(d => !state.entries[d.itemId]).map(d => d.itemId));
   let mainPages;
   try {
     await trigger(page, "/aweme/listcollection/", () => page.goto(
       "https://www.douyin.com/user/self?showTab=favorite_collection&showSubTab=video",
       { waitUntil: "domcontentloaded" }));
     mainPages = await finishPages(page, captureMain, "/aweme/listcollection/",
-      () => collect(captureMain.records, "/aweme/listcollection/"));
+      () => collect(captureMain.records, "/aweme/listcollection/"), {
+        stopWhen: chain => {
+          const loaded = new Set(unique(chain, "items").map(i => i.id));
+          return [...needed].every(id => loaded.has(id));
+        }
+      });
   } finally { captureMain.stop(); }
   const available = new Set(unique(mainPages, "items").map(i => i.id));
   state.status = "running";
@@ -164,6 +174,12 @@ try {
   state.status = plan.unresolved.length || state.unfinished.length ? "partial" : "completed";
   state.finishedAt = new Date().toISOString();
   await persist();
+  // 已逐批在目标收藏夹独立读回，不再为最终验收重扫全部收藏和全部成员。
+  // 该快照只代表分类读回，不能标成收藏全量快照。
+  await save("final-snapshot.json", { ...snapshot, at: state.finishedAt,
+    scope: "classification_readback", complete: false, folders: currentMemberships,
+    unclassified: snapshot.unclassified.filter(i =>
+      !["verified", "already_filed_elsewhere"].includes(state.entries[i.id]?.status)) });
   log({ phase: state.status, entries: Object.keys(state.entries).length, unresolved: plan.unresolved.length,
     unavailable: state.unavailable.length });
 } catch (error) {
