@@ -31,6 +31,8 @@ async function privateJson(path) {
 const config = await privateJson(".data/daily/config.json");
 const account = await privateJson(".data/account-status.json");
 const state = await privateJson(".data/learning/state.json");
+const models = await privateJson(".data/model-settings.json");
+if (typeof models?.apiKey === "string" && models.apiKey.length >= 12) privateValues.add(models.apiKey);
 for (const value of [config?.accountId, config?.accountName, account?.accountId, account?.nickname,
   ...(state?.sources ?? []).map(s => s.accountId), ...(state?.items ?? []).map(i => i.id)]) {
   if (typeof value === "string" && value.length >= 6) privateValues.add(value);

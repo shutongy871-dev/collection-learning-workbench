@@ -85,6 +85,7 @@ await atomicJSON(join(dataDir, "content-batch", "ledger.json"), {
 });
 let syncCalls = 0, finishSync;
 const server = await startLearningServer({ dataDir, port: 0, importOnStart: false, getModelConfig: () => modelConfig,
+  modelEnvironment: {},
   accountAdapters: {
     launchLogin: () => ({ exitCode: 0, signalCode: null, once() {} }),
     readAccount: async () => ({ id: "synthetic-ui-account", nickname: "测试使用者" })
@@ -218,17 +219,39 @@ try {
   });
   await check("手动同步分类按钮启动任务、刷新保留进度、完成自动更新", async () => {
     await page.getByRole("button", { name: "同步并分类", exact: false }).click();
-    await page.locator("#collection-sync-status").filter({ hasText: "正在后台同步" }).waitFor();
+    await page.getByRole("button", { name: "正在同步分类", exact: false }).waitFor();
     assert.equal(await page.locator("#refresh").isDisabled(), true);
     await page.reload();
-    await page.locator("#collection-sync-status").filter({ hasText: "正在后台同步" }).waitFor();
+    await page.getByRole("button", { name: "正在同步分类", exact: false }).waitFor();
     assert.equal(syncCalls, 1);
     finishSync({ status: "completed", scanned: state.items.length, verified: 0, pending: 0 });
-    await page.locator("#collection-sync-status").filter({ hasText: "同步完成" }).waitFor();
+    await page.getByRole("button", { name: "同步并分类", exact: false }).waitFor();
     assert.equal(await page.locator("#refresh").isDisabled(), false);
   });
+  await check("模型配置：隐藏输入、保存启动后台、重开不回显密钥，手机无溢出", async () => {
+    await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.getByRole("button", { name: "模型配置", exact: true }).click();
+    await page.getByRole("heading", { name: "模型配置", exact: true }).waitFor();
+    assert.equal(await page.locator("#model-form input[name=apiKey]").getAttribute("type"), "password");
+    await page.getByLabel("API Key", { exact: true }).fill("synthetic-ui-model-key-only");
+    assert.equal(await page.getByLabel("模型名称 / 接入点 ID", { exact: true }).inputValue(), "qwen-vl-plus");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.getByRole("button", { name: "保存并开始出题", exact: true }).click();
+    await page.locator("#toast").filter({ hasText: "模型配置已保存" }).waitFor();
+    assert.equal(await page.locator("#model-dialog").evaluate(d => d.open), false);
+    assert.equal(await page.getByLabel("API Key", { exact: true }).inputValue(), "");
+    await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.getByRole("button", { name: "模型配置", exact: true }).click();
+    await page.locator("#model-status").filter({ hasText: "本机已保存密钥" }).waitFor();
+    assert.equal(await page.getByLabel("API Key", { exact: true }).inputValue(), "");
+    await page.getByRole("button", { name: "关闭模型配置", exact: true }).click();
+    for (let i = 0; i < 100; i++) {
+      if (!(await (await fetch(`${origin}/api/batch`)).json()).active) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+  });
   assert.deepEqual(errors, []);
-  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 7, items: state.items.length,
+  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 8, items: state.items.length,
     productionQuestions: productionQuestionCount, fixtureQuestions: 1, generatedQuestions: 2, questionRequests,
     consoleErrors: errors, isolatedData: true }, null, 2));
   console.log("全部浏览器验收通过；正式学习记录未被修改。");

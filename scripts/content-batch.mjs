@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
-import { batchStatus, configureBatch, planBatch, runContentBatch, loadModelConfig } from "../src/learning/batch.mjs";
+import { batchStatus, configureBatch, planBatch, runContentBatch } from "../src/learning/batch.mjs";
+import { configuredModels } from "../src/understanding/model-settings.mjs";
 import { generateQuestions, generationSummary } from "../src/learning/generator.mjs";
 import { learningStore } from "../src/learning/store.mjs";
 
@@ -39,7 +40,7 @@ async function main() {
     const items = state.items.filter(i => values.item && [i.key, i.id].includes(values.item));
     if (items.length !== 1) throw new Error("single_item_required");
     result = generationSummary(await generateQuestions({ dataDir, itemKey: items[0].key,
-      config: loadModelConfig().question, retry: values.retry }));
+      config: configuredModels(dataDir).question, retry: values.retry }));
   } else throw new Error("unknown_command");
   console.log(JSON.stringify(result, null, 2));
 }

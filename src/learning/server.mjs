@@ -7,13 +7,13 @@ import { importCollections } from "./import.mjs";
 import { dailyLearningQueue, dayKey, dueQuestions, validateQuestion } from "./domain.mjs";
 import { routeContent } from "../understanding/route.mjs";
 import { latestContent, publicContent } from "../understanding/pipeline.mjs";
-import { contentConfig, questionConfig, loadContentEnv } from "../understanding/config.mjs";
 import { learningStore } from "./store.mjs";
 import { previewReview, summarizeProgress } from "./scheduler.mjs";
 import { decideDraft, generateQuestions, generationSummary } from "./generator.mjs";
 import { batchStatus, configureBatch, planBatch, runContentBatch } from "./batch.mjs";
 import { collectionSync } from "./collection-sync.mjs";
 import { accountManager } from "./account.mjs";
+import { configuredModels, modelSettings } from "../understanding/model-settings.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const error = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -30,19 +30,23 @@ async function body(req) {
   try { return JSON.parse(data || "{}"); } catch { throw error("请求不是有效 JSON"); }
 }
 export async function startLearningServer({ dataDir = join(here, "../../.data"), port = 7790, importOnStart = true,
-  autoPrepare = false, classificationRunner, accountAdapters = {},
-  getModelConfig = () => { loadContentEnv(); return { content: contentConfig(), question: questionConfig() }; } } = {}) {
+  autoPrepare = false, classificationRunner, accountAdapters = {}, modelEnvironment,
+  getModelConfig = () => configuredModels(dataDir, modelEnvironment) } = {}) {
   const store = learningStore(dataDir), mutate = store.mutate;
   const sync = collectionSync({ dataDir, store, runner: classificationRunner,
     onComplete: () => { if (autoPrepare) startBatch(); } });
   const account = accountManager({ dataDir, store, ...accountAdapters });
-  let batchTask = null;
+  const settings = modelSettings(dataDir, modelEnvironment);
+  let batchTask = null, retryAfterBatch = false;
   await store.initialize(importOnStart);
   const startBatch = (retry = false) => {
     if (batchTask) return false;
     batchTask = runContentBatch({ dataDir, retry, getModelConfig })
       .catch(e => { console.error("content_batch_failed", e.code || "batch_failed"); })
-      .finally(() => { batchTask = null; });
+      .finally(() => {
+        batchTask = null;
+        if (retryAfterBatch) { retryAfterBatch = false; startBatch(true); }
+      });
     return true;
   };
   const publicState = state => {
@@ -81,6 +85,7 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
       if (req.method === "GET" && url.pathname === "/api/state") return json(res, 200, publicState(state));
       if (req.method === "GET" && url.pathname === "/api/collection-sync") return json(res, 200, await sync.status());
       if (req.method === "GET" && url.pathname === "/api/account") return json(res, 200, await account.status());
+      if (req.method === "GET" && url.pathname === "/api/model-settings") return json(res, 200, settings.status());
       if (req.method === "GET" && url.pathname === "/api/batch") return json(res, 200, {
         ...await batchStatus(dataDir), plan: await planBatch(dataDir), active: Boolean(batchTask) });
       if (req.method === "GET" && url.pathname === "/api/drafts") {
@@ -103,6 +108,13 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
       }
       if (req.method === "POST" && url.pathname.startsWith("/api/")) {
         const b = await body(req);
+        if (url.pathname === "/api/model-settings") {
+          const saved = await settings.save(b);
+          const current = await store.read();
+          await configureBatch(dataDir, { enabled: true, maxItemsPerDay: current.learningConfig.dailyVideos });
+          if (!startBatch(true)) retryAfterBatch = true;
+          return json(res, 200, { ...saved, preparing: true });
+        }
         if (url.pathname === "/api/account/login") return json(res, 202, await account.login());
         if (url.pathname === "/api/account/check") return json(res, 200, await account.check());
         if (url.pathname === "/api/collection-sync") return json(res, 202, await sync.start());

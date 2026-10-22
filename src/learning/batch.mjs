@@ -3,6 +3,7 @@ import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { atomicJSON, digest, itemDirectory, readJSON, processContent, totalReserved } from "../understanding/pipeline.mjs";
 import { contentConfig, questionConfig, loadContentEnv } from "../understanding/config.mjs";
+import { configuredModels } from "../understanding/model-settings.mjs";
 import { routeContent } from "../understanding/route.mjs";
 import { fail } from "../understanding/media.mjs";
 import { learningStore } from "./store.mjs";
@@ -79,7 +80,7 @@ async function itemCosts(dataDir, key) {
   return total;
 }
 export async function runContentBatch({ dataDir, retry = false, scheduled = false, now = new Date(),
-  getModelConfig = loadModelConfig, adapters = {} }) {
+  getModelConfig = () => configuredModels(dataDir), adapters = {} }) {
   const initial = await batchStatus(dataDir, now);
   const hour = new Date(+new Date(now) + 8 * 3600000).getUTCHours();
   if (scheduled && (!initial.config.enabled || hour < initial.config.hour))

@@ -10,13 +10,31 @@
 <body>
   <a class="skip" href="#main">跳到主要内容</a>
   <div class="workspace">
-    <header class="topbar"><div class="breadcrumb">我的空间 <span>/</span> <strong id="crumb">今日学习</strong></div><div class="top-actions"><span id="today-date"></span><button id="refresh" class="quiet" title="手动同步抖音收藏、分类并更新学习库">↻ 同步并分类</button><details class="account-menu"><summary class="avatar" aria-label="抖音账号">我</summary><div class="account-panel"><p id="account-state">登录状态待核验</p><button id="account-login" class="secondary">登录抖音</button><button id="account-check" class="secondary">检查登录</button></div></details></div></header>
-    <p id="collection-sync-status" role="status" aria-live="polite" style="margin:12px 24px;color:#786a88;font-size:12px" hidden></p>
+    <header class="topbar"><div class="top-actions"><span id="today-date"></span><button id="refresh" class="quiet" title="手动同步抖音收藏、分类并更新学习库">↻ 同步并分类</button><details class="account-menu"><summary class="avatar" aria-label="抖音账号">我</summary><div class="account-panel"><p id="account-state">登录状态待核验</p><button id="account-login" class="secondary">登录抖音</button><button id="account-check" class="secondary">检查登录</button></div></details></div></header>
     <main id="main" tabindex="-1"><div id="loading" class="loading"><span class="brand-mark">✳</span><h1>正在打开你的收藏空间</h1><p>整理本地收藏与学习记录…</p></div></main>
     <footer>拾光 · 让每一次收藏，都有回响。<span>学习记录保存在这台电脑</span></footer>
   </div>
   <dialog id="detail" class="detail-dialog" aria-labelledby="detail-title"></dialog>
   <dialog id="quiz" class="quiz-dialog" aria-labelledby="quiz-title"></dialog>
+  <dialog id="model-dialog" aria-labelledby="model-title">
+    <form id="model-form" class="dialog-inner model-form">
+      <div class="panel-title"><h2 id="model-title">模型配置</h2><button type="button" id="model-close" class="quiet" aria-label="关闭模型配置">关闭</button></div>
+      <p id="model-status" class="tiny-note"></p>
+      <label>模型供应商<select name="provider"><option value="qwen">百炼（北京）</option><option value="doubao">豆包（北京）</option></select></label>
+      <label>API Key<input name="apiKey" type="password" autocomplete="new-password" maxlength="512" placeholder="填写自己的 API Key"></label>
+      <label>模型名称 / 接入点 ID<input name="model" required maxlength="128"></label>
+      <p class="tiny-note">模型需支持图片理解和文字出题。百炼默认使用 qwen-vl-plus；豆包填写控制台中支持图片的接入点。</p>
+      <details><summary>费用设置</summary>
+        <label>输入单价（元 / 百万 tokens）<input name="inputPrice" type="number" step="any" min="0.000001" required></label>
+        <label>输出单价（元 / 百万 tokens）<input name="outputPrice" type="number" step="any" min="0.000001" required></label>
+        <label>每条视频预算（元）<input name="contentBudget" type="number" step="any" min="0.000001" max="10" required></label>
+        <p class="tiny-note">默认价格仅供参考，请按供应商当前价格核对。每日总预算沿用本机设置。</p>
+      </details>
+      <p class="tiny-note">密钥仅保存在这台电脑。所选视频帧与出题原文会发送给模型供应商，费用由自己的账号承担。</p>
+      <p id="model-error" role="alert"></p>
+      <button type="submit" class="primary">保存并开始出题</button>
+    </form>
+  </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/app.mjs"></script>
 </body>

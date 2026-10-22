@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
-import { contentConfig, loadContentEnv } from "../src/understanding/config.mjs";
+import { configuredModels } from "../src/understanding/model-settings.mjs";
 import { routeContent } from "../src/understanding/route.mjs";
 import { providerDoctor, visionReservation } from "../src/understanding/providers.mjs";
 import { processContent, publicContent } from "../src/understanding/pipeline.mjs";
@@ -24,8 +24,8 @@ export async function main(args = process.argv.slice(2)) {
     out: { type: "string" }, "data-dir": { type: "string" }, retry: { type: "boolean" }
   } });
   if (v.help) { console.log(help); return; }
-  loadContentEnv();
-  const command = positionals[0], config = contentConfig();
+  const dataDir = resolve(v["data-dir"] || process.env.LEARNING_DATA_DIR || ".data");
+  const command = positionals[0], config = configuredModels(dataDir).content;
   if (command === "doctor") { console.log(JSON.stringify(await providerDoctor(config), null, 2)); return; }
   if (!["plan", "process", "vision-check"].includes(command)) throw new Error(help);
   if (command === "vision-check") {
@@ -34,7 +34,6 @@ export async function main(args = process.argv.slice(2)) {
     config.maxFrames = 1;
     config.visionMaxOutputTokens = Math.min(config.visionMaxOutputTokens, 512);
   }
-  const dataDir = resolve(v["data-dir"] || process.env.LEARNING_DATA_DIR || ".data");
   const state = JSON.parse(await readFile(resolve(dataDir, "learning/state.json"), "utf8"));
   const input = v.input ? JSON.parse(await readFile(resolve(v.input), "utf8")) : {};
   const key = v.item || input.itemKey;

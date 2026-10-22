@@ -96,14 +96,12 @@ function learningFootprint(items) {
   const total = items.length;
   const learned = new Set(state.events.map(e=>e.itemKey));
   return [["已生成题目",items.filter(i=>state.progress[i.key]).length],["完成学习",items.filter(i=>learned.has(i.key)).length]].map(([l,n])=>
-    `<div class="progress-row"><span>${l}</span><div class="bar-track"><i style="width:${total?n/total*100:0}%"></i></div><strong>${number(n)}</strong></div>`).join("")+
-    `<p class="tiny-note" style="margin-top:24px">喜欢是起点，理解需要时间。<br>“完成学习”表示完成过答题，不等于已经掌握。</p>`;
+    `<div class="progress-row"><span>${l}</span><div class="bar-track"><i style="width:${total?n/total*100:0}%"></i></div><strong>${number(n)}</strong></div>`).join("");
 }
 function render() {
   if (!state) return;
   const active = view();
   $("title").textContent = `${labels[active]} · 拾光`;
-  $("#crumb").textContent = labels[active];
   $("#today-date").textContent = new Date().toLocaleDateString("zh-CN",{timeZone:"Asia/Shanghai",month:"long",day:"numeric",weekday:"long"});
   $("#main").innerHTML = todayPage();
   if(active === "today") void loadBatch();
@@ -349,12 +347,6 @@ function renderSync(job) {
   const active = job.status === "running" || job.active === true;
   $("#refresh").disabled = active;
   $("#refresh").textContent = active ? "↻ 正在同步分类…" : "↻ 同步并分类";
-  const target = $("#collection-sync-status");
-  target.hidden = job.status === "idle";
-  target.textContent = active ? "正在后台同步收藏并分类，完成后会自动更新学习库。" :
-    ["completed", "partial"].includes(job.status) ?
-      `同步完成 · 新入库 ${job.imported} 条 · 已核验分类 ${job.classified} 条${job.pending ? ` · ${job.pending} 条未匹配分类` : ""}` :
-      syncError(job.error);
 }
 async function loadSync() {
   clearTimeout(syncTimer);
@@ -370,8 +362,6 @@ async function loadSync() {
       toast(["completed", "partial"].includes(job.status) ? "收藏已同步并分类，学习库已更新" : syncError(job.error));
     }
   } catch {
-    $("#collection-sync-status").hidden = false;
-    $("#collection-sync-status").textContent = "暂时无法读取同步状态，正在重新连接…";
     syncTimer = setTimeout(() => void loadSync(), 4000);
   }
 }
@@ -405,6 +395,59 @@ async function accountAction(path) {
 $("#account-login").addEventListener("click", () => void accountAction("account/login"));
 $("#account-check").addEventListener("click", () => void accountAction("account/check"));
 api("account").then(renderAccount).catch(() => {});
+const modelButton = document.createElement("button");
+modelButton.type = "button";
+modelButton.className = "secondary";
+modelButton.id = "model-open";
+modelButton.textContent = "模型配置";
+$(".account-panel").append(modelButton);
+let modelConfiguration;
+function fillModelFields(settings) {
+  const form = $("#model-form");
+  for (const key of ["provider", "model", "inputPrice", "outputPrice", "contentBudget"])
+    form.elements[key].value = settings[key] ?? "";
+  form.elements.apiKey.value = "";
+  form.elements.apiKey.placeholder = settings.credentialPresent ? "已保存，留空保留原密钥" : "填写自己的 API Key";
+  $("#model-status").textContent = settings.credentialPresent ? "本机已保存密钥；保存配置可恢复出题。" : "尚未配置自己的模型。";
+}
+modelButton.addEventListener("click", async () => {
+  try {
+    modelConfiguration = await api("model-settings");
+    fillModelFields(modelConfiguration);
+    $("#model-error").textContent = "";
+    $(".account-menu").open = false;
+    $("#model-dialog").showModal();
+  } catch { toast("暂时无法读取模型配置，请稍后重试。"); }
+});
+function closeModelDialog() {
+  $("#model-form").elements.apiKey.value = "";
+  $("#model-dialog").close();
+}
+$("#model-close").addEventListener("click", closeModelDialog);
+$("#model-dialog").addEventListener("close", () => { $("#model-form").elements.apiKey.value = ""; });
+$("#model-form").elements.provider.addEventListener("change", event => {
+  const provider = event.target.value, preset = modelConfiguration.presets[provider];
+  fillModelFields(provider === modelConfiguration.provider ? modelConfiguration :
+    { provider, ...preset, contentBudget: 0.05, credentialPresent: false });
+  $("#model-form details").open = provider === "doubao";
+});
+$("#model-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget, submit = form.querySelector("[type=submit]");
+  submit.disabled = true;
+  $("#model-error").textContent = "";
+  try {
+    const provider = form.elements.provider.value;
+    await api("model-settings", { provider, baseUrl: modelConfiguration.presets[provider].baseUrl,
+      model: form.elements.model.value.trim(), apiKey: form.elements.apiKey.value.trim(),
+      inputPrice: Number(form.elements.inputPrice.value), outputPrice: Number(form.elements.outputPrice.value),
+      contentBudget: Number(form.elements.contentBudget.value) });
+    closeModelDialog();
+    toast("模型配置已保存，正在后台准备题目。");
+    void loadBatch();
+  } catch (e) { $("#model-error").textContent = e.message; }
+  finally { submit.disabled = false; }
+});
 window.addEventListener("hashchange",()=>{window.scrollTo(0,0);void reload();});
 let resizeTimer;
 window.addEventListener("resize",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(!$("#detail").open&&!$("#quiz").open)render();},180);});
