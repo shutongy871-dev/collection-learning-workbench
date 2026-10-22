@@ -58,7 +58,7 @@ dialog{border:1px solid #e0d8e8;padding:0;box-shadow:0 20px 100px #2f1d4330;colo
 .distribution-note{font-size:10px;line-height:1.7;color:var(--muted);margin-top:15px}
 @media(max-width:1150px){.insights-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.footprint-panel{grid-column:1/-1}}
 @media(max-width:900px){.insights-grid{grid-template-columns:minmax(0,1fr);gap:14px}.footprint-panel{grid-column:auto}}
-@media(max-width:420px){.folder-pie{width:112px;flex-basis:112px}.folder-distribution{gap:12px}.folder-legend li{column-gap:5px}}
+@media(max-width:420px){.folder-pie{width:112px;flex-basis:112px}.folder-distribution{gap:12px}.folder-legend li{column-gap:5px}.trend-panel .chart text{font-size:17px}}
 .connection-cta[data-status="verified"]{background:#edf3e7;border-color:#d3e0c6;color:var(--green)}
 .account-feedback{font-size:12px;line-height:1.7;color:var(--muted);text-align:right;overflow-wrap:anywhere}
 .account-feedback[hidden]{display:none}
