@@ -8,8 +8,27 @@ export const modelPresets = {
   qwen: { baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     model: "qwen-vl-plus", inputPrice: 0.8, outputPrice: 2 },
   doubao: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    model: "", inputPrice: null, outputPrice: null }
+    model: "", inputPrice: null, outputPrice: null },
+  compatible: { baseUrl: "", model: "", inputPrice: null, outputPrice: null }
 };
+function validateEndpoint(provider, value) {
+  if (!Object.hasOwn(modelPresets, provider)) throw new Error("请选择有效的接口类型");
+  if (provider !== "compatible") {
+    if (value !== modelPresets[provider].baseUrl) throw new Error("请选择对应供应商的官方接口地址");
+    return value;
+  }
+  let url;
+  try {
+    if (typeof value !== "string" || value.length > 2048) throw new Error();
+    url = new URL(value.trim());
+  } catch { throw new Error("请填写有效的 API 地址（Base URL）"); }
+  if (url.username || url.password || url.search || url.hash ||
+      (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))))
+    throw new Error("API 地址需使用 HTTPS；本机 localhost 或 127.0.0.1 可使用 HTTP，地址不能含密钥或查询参数");
+  if (/\/chat\/completions\/?$/.test(url.pathname))
+    throw new Error("请填写 Base URL，不要包含末尾的 /chat/completions");
+  return url.href.replace(/\/+$/, "");
+}
 const fileFor = dataDir => join(dataDir, "model-settings.json");
 function readSettings(dataDir) {
   try {
@@ -59,16 +78,17 @@ export function modelSettings(dataDir, baseEnv) {
     try {
       const keys = ["provider", "baseUrl", "model", "apiKey", "inputPrice", "outputPrice", "contentBudget"];
       if (!input || Object.keys(input).some(k => !keys.includes(k))) throw new Error("模型配置字段无效");
-      const { provider, baseUrl, model } = input;
-      if (!modelPresets[provider] || baseUrl !== modelPresets[provider].baseUrl)
-        throw new Error("请选择对应供应商的官方接口地址");
+      const { provider, model } = input;
+      const baseUrl = validateEndpoint(provider, input.baseUrl);
       if (typeof model !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(model))
         throw new Error("请填写有效模型名称或接入点 ID");
       const previous = configuredModels(dataDir, baseEnv).question;
       if (typeof input.apiKey !== "string") throw new Error("密钥格式无效");
       const apiKey = input.apiKey.trim() || (previous.provider === provider &&
         previous.baseUrl === baseUrl ? previous.apiKey : "");
-      if (!/^[A-Za-z0-9_.-]{16,512}$/.test(apiKey)) throw new Error("请填写该供应商的 API Key");
+      const validKey = provider === "compatible" ? /^[\x21-\x7E]{1,512}$/.test(apiKey) :
+        /^[A-Za-z0-9_.-]{16,512}$/.test(apiKey);
+      if (!validKey) throw new Error("请填写该供应商的 API Key");
       for (const key of ["inputPrice", "outputPrice", "contentBudget"])
         if (typeof input[key] !== "number" || !Number.isFinite(input[key]) ||
           input[key] <= 0 || input[key] > (key === "contentBudget" ? 10 : 10000))

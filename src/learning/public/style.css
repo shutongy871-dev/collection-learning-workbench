@@ -48,6 +48,7 @@ dialog{border:1px solid #e0d8e8;padding:0;box-shadow:0 20px 100px #2f1d4330;colo
 .account-panel button{margin:4px 0}
 .model-form{display:grid;gap:14px}
 .model-form label{display:grid;gap:6px;font-size:13px}
+.model-form [hidden]{display:none}
 .model-form input,.model-form select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink)}
 .model-form details label{margin-top:12px}
 .model-form summary{cursor:pointer;font-size:13px}

@@ -24,7 +24,7 @@ export function providerPython(provider) {
 export function contentConfig(env = process.env) {
   const asrProvider = env.CONTENT_ASR_PROVIDER || "whisper";
   const visionProvider = env.CONTENT_VISION_PROVIDER || "qwen";
-  if (!["whisper", "funasr"].includes(asrProvider) || !["qwen", "doubao"].includes(visionProvider))
+  if (!["whisper", "funasr"].includes(asrProvider) || !["qwen", "doubao", "compatible"].includes(visionProvider))
     throw new Error("invalid_provider");
   for (const key of ["CONTENT_MAX_FRAMES", "CONTENT_VISION_MAX_INPUT_TOKENS", "CONTENT_VISION_MAX_OUTPUT_TOKENS"])
     if (env[key] && !Number.isInteger(Number(env[key]))) throw new Error(`invalid_config:${key}`);
@@ -42,7 +42,8 @@ export function contentConfig(env = process.env) {
     frameIntervalMs: number(env, "CONTENT_FRAME_INTERVAL_SECONDS", 15, 1, 300) * 1000,
     visionProvider,
     visionBaseUrl: env.CONTENT_VISION_BASE_URL || (visionProvider === "qwen" ?
-      "https://dashscope.aliyuncs.com/compatible-mode/v1" : "https://ark.cn-beijing.volces.com/api/v3"),
+      "https://dashscope.aliyuncs.com/compatible-mode/v1" : visionProvider === "doubao" ?
+        "https://ark.cn-beijing.volces.com/api/v3" : ""),
     visionModel: env.CONTENT_VISION_MODEL || "",
     // 百炼官方变量仅用于 Qwen，不能把它误发给其他提供方。
     visionApiKey: (env.CONTENT_VISION_API_KEY || (visionProvider === "qwen" ? env.DASHSCOPE_API_KEY : "") || "").trim(),
@@ -65,9 +66,10 @@ export function processingSignature(config) {
 export function questionConfig(env = process.env) {
   const content = contentConfig(env);
   const provider = env.CONTENT_QUESTION_PROVIDER || content.visionProvider;
-  if (!["qwen", "doubao"].includes(provider)) throw new Error("invalid_question_provider");
+  if (!["qwen", "doubao", "compatible"].includes(provider)) throw new Error("invalid_question_provider");
   const baseUrl = env.CONTENT_QUESTION_BASE_URL || (provider === content.visionProvider ? content.visionBaseUrl :
-    provider === "qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1" : "https://ark.cn-beijing.volces.com/api/v3");
+    provider === "qwen" ? "https://dashscope.aliyuncs.com/compatible-mode/v1" :
+      provider === "doubao" ? "https://ark.cn-beijing.volces.com/api/v3" : "");
   const sharesVisionEndpoint = provider === content.visionProvider && baseUrl === content.visionBaseUrl;
   const apiKey = (env.CONTENT_QUESTION_API_KEY || (sharesVisionEndpoint ? content.visionApiKey : "") || "").trim();
   for (const key of ["CONTENT_QUESTION_MAX_INPUT_TOKENS", "CONTENT_QUESTION_MAX_OUTPUT_TOKENS"])

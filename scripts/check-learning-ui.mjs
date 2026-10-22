@@ -279,8 +279,41 @@ try {
       await new Promise(r => setTimeout(r, 20));
     }
   });
+  await check("供应商切换不展开费用；自定义接口可保存、重开回读且不回显密钥", async () => {
+    await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.getByRole("button", { name: "模型配置", exact: true }).click();
+    await page.locator("#model-dialog[open]").waitFor();
+    for (const provider of ["doubao", "qwen", "compatible"]) {
+      await page.getByLabel("模型供应商", { exact: true }).selectOption(provider);
+      assert.equal(await page.locator("#model-form details").evaluate(el => el.open), false);
+      assert.equal(await page.locator("#model-endpoint").isVisible(), provider === "compatible");
+    }
+    await page.getByLabel("API 地址（Base URL）", { exact: true }).fill("https://models.example.org/v1/");
+    await page.getByLabel("API Key", { exact: true }).fill("synthetic-custom-model-key-only");
+    await page.getByLabel("模型名称 / 接入点 ID", { exact: true }).fill("example-vision-model");
+    await page.getByRole("button", { name: "保存并开始出题", exact: true }).click();
+    assert.equal(await page.locator("#model-form details").evaluate(el => el.open), true);
+    assert.equal(await page.locator("#model-dialog").evaluate(el => el.open), true);
+    await page.getByLabel("输入单价（元 / 百万 tokens）", { exact: true }).fill("1");
+    await page.getByLabel("输出单价（元 / 百万 tokens）", { exact: true }).fill("2");
+    await page.getByRole("button", { name: "保存并开始出题", exact: true }).click();
+    await page.locator("#model-dialog:not([open])").waitFor({ state: "attached" });
+    await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.getByRole("button", { name: "模型配置", exact: true }).click();
+    await page.locator("#model-dialog[open]").waitFor();
+    assert.equal(await page.getByLabel("模型供应商", { exact: true }).inputValue(), "compatible");
+    assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).inputValue(), "https://models.example.org/v1");
+    assert.equal(await page.getByLabel("API Key", { exact: true }).inputValue(), "");
+    assert.equal(await page.locator("#model-form details").evaluate(el => el.open), false);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.getByRole("button", { name: "关闭模型配置", exact: true }).click();
+    for (let i = 0; i < 100; i++) {
+      if (!(await (await fetch(`${origin}/api/batch`)).json()).active) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+  });
   assert.deepEqual(errors, []);
-  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 10, items: state.items.length,
+  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 11, items: state.items.length,
     productionQuestions: productionQuestionCount, fixtureQuestions: 1, generatedQuestions: 2, questionRequests,
     consoleErrors: errors, isolatedData: true }, null, 2));
   console.log("全部浏览器验收通过；正式学习记录未被修改。");

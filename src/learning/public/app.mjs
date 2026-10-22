@@ -471,8 +471,11 @@ $(".account-panel").append(modelButton);
 let modelConfiguration;
 function fillModelFields(settings) {
   const form = $("#model-form");
-  for (const key of ["provider", "model", "inputPrice", "outputPrice", "contentBudget"])
+  for (const key of ["provider", "baseUrl", "model", "inputPrice", "outputPrice", "contentBudget"])
     form.elements[key].value = settings[key] ?? "";
+  const custom = settings.provider === "compatible";
+  $("#model-endpoint").hidden = $("#model-endpoint-help").hidden = !custom;
+  form.elements.baseUrl.disabled = !custom;
   form.elements.apiKey.value = "";
   form.elements.apiKey.placeholder = settings.credentialPresent ? "已保存，留空保留原密钥" : "填写自己的 API Key";
   $("#model-status").textContent = settings.credentialPresent ? "本机已保存密钥；保存配置可恢复出题。" : "尚未配置自己的模型。";
@@ -481,6 +484,7 @@ async function openModelConfiguration() {
   try {
     modelConfiguration = await api("model-settings");
     fillModelFields(modelConfiguration);
+    $("#model-form details").open = false;
     $("#model-error").textContent = "";
     $(".account-menu").open = false;
     if (!$("#model-dialog").open) $("#model-dialog").showModal();
@@ -500,8 +504,12 @@ $("#model-form").elements.provider.addEventListener("change", event => {
   const provider = event.target.value, preset = modelConfiguration.presets[provider];
   fillModelFields(provider === modelConfiguration.provider ? modelConfiguration :
     { provider, ...preset, contentBudget: 0.05, credentialPresent: false });
-  $("#model-form details").open = provider === "doubao";
 });
+// Show invalid fee fields on submit for any provider, rather than forcing the section open on selection.
+$("#model-form").addEventListener("invalid", event => {
+  const fees = event.target.closest("details");
+  if (fees) fees.open = true;
+}, true);
 $("#model-form").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget, submit = form.querySelector("[type=submit]");
@@ -509,7 +517,8 @@ $("#model-form").addEventListener("submit", async event => {
   $("#model-error").textContent = "";
   try {
     const provider = form.elements.provider.value;
-    await api("model-settings", { provider, baseUrl: modelConfiguration.presets[provider].baseUrl,
+    await api("model-settings", { provider, baseUrl: provider === "compatible" ? form.elements.baseUrl.value.trim() :
+      modelConfiguration.presets[provider].baseUrl,
       model: form.elements.model.value.trim(), apiKey: form.elements.apiKey.value.trim(),
       inputPrice: Number(form.elements.inputPrice.value), outputPrice: Number(form.elements.outputPrice.value),
       contentBudget: Number(form.elements.contentBudget.value) });

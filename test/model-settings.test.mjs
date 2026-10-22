@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, stat, symlink } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, stat, symlink } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configuredModels, modelSettings, modelPresets } from "../src/understanding/model-settings.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
+import { understandFrames } from "../src/understanding/providers.mjs";
+import { requestQuestions } from "../src/learning/generator.mjs";
 
 const key = "synthetic-local-api-key-only";
 const input = { provider: "qwen", ...modelPresets.qwen, apiKey: key, contentBudget: .05 };
@@ -45,6 +48,62 @@ test("model settings refuse symlinks", async t => {
   const dir = await fixture(t);
   await symlink(join(dir, "missing.json"), join(dir, "model-settings.json"));
   await assert.rejects(modelSettings(dir, {}).save(input), /符号链接/);
+});
+test("custom endpoint persists for both stages; changing the endpoint requires its own credential", async t => {
+  const dir = await fixture(t), manager = modelSettings(dir, {});
+  const custom = { ...input, provider: "compatible", baseUrl: "https://models.example.org/v1/",
+    model: "example-vision-model", inputPrice: 1, outputPrice: 2 };
+  await manager.save(custom);
+  const configured = configuredModels(dir, { DASHSCOPE_API_KEY: "unused-synthetic-key" });
+  assert.equal(configured.content.visionProvider, "compatible");
+  assert.equal(configured.question.provider, "compatible");
+  assert.equal(configured.content.visionBaseUrl, "https://models.example.org/v1");
+  assert.equal(configured.question.baseUrl, configured.content.visionBaseUrl);
+  assert.equal(configured.question.apiKey, key);
+  assert.equal(manager.status().baseUrl, "https://models.example.org/v1");
+  assert.equal(JSON.stringify(manager.status()).includes(key), false);
+  await manager.save({ ...custom, apiKey: "" });
+  await assert.rejects(manager.save({ ...custom, baseUrl: "https://other.example.org/v1", apiKey: "" }), /API Key/);
+  for (const baseUrl of ["http://models.example.org/v1", "file:///tmp/model",
+    "https://user:password@models.example.org/v1", "https://models.example.org/v1?key=test",
+    "https://models.example.org/v1#key", "https://models.example.org/v1/chat/completions"]) {
+    await assert.rejects(manager.save({ ...custom, baseUrl }), /API 地址|Base URL/);
+  }
+});
+test("custom compatible service receives image and question requests, and both responses preserve usage", async t => {
+  const dir = await fixture(t), requests = [], evidence = "主动回忆时先用自己的话复述，再对照原文检查遗漏。";
+  const endpoint = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const parsed = JSON.parse(body);
+    requests.push({ path: req.url, body: parsed, authorization: req.headers.authorization });
+    const visual = Array.isArray(parsed.messages[0].content);
+    const content = visual ? { observations: [{ frameId: "frame-1", text: "画面展示学习步骤" }],
+      claims: [{ text: "画面包含学习步骤", evidenceIds: ["frame-1"] }] } :
+      { questions: [{ prompt: "根据原文，主动回忆时首先做什么？",
+        options: ["用自己的话复述", "删除原文", "跳过复习", "只读标题"], answer: 0,
+        evidence, explanation: "先复述，再核对遗漏。", sourceId: "source-1" }] };
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 50 },
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify(content) } }] }));
+  });
+  await new Promise(r => endpoint.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise(r => endpoint.close(r)));
+  await modelSettings(dir, {}).save({ ...input, provider: "compatible",
+    baseUrl: `http://127.0.0.1:${endpoint.address().port}/v1`, model: "mock-vision" });
+  const models = configuredModels(dir, {}), path = join(dir, "frame.jpg");
+  await writeFile(path, Buffer.from([255, 216, 255, 217]));
+  const vision = await understandFrames([{ id: "frame-1", path, timestampMs: 0 }], [], models.content);
+  const question = await requestQuestions([{ id: "source-1", text: evidence }], models.question);
+  assert.equal(vision.error, undefined);
+  assert.equal(question.error, undefined);
+  assert.equal(question.result.length, 1);
+  assert.equal(vision.usage.inputTokens, 100);
+  assert.equal(question.usage.outputTokens, 50);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(r => r.path === "/v1/chat/completions" && r.authorization === `Bearer ${key}` &&
+    r.body.model === "mock-vision"));
+  assert.ok(requests[0].body.messages[0].content.some(c => c.type === "image_url"));
 });
 test("HTTP model settings save enables batch, never exports key and rejects cross-origin saves", async t => {
   const dir = await fixture(t);
