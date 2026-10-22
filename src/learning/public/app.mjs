@@ -473,9 +473,6 @@ function fillModelFields(settings) {
   const form = $("#model-form");
   for (const key of ["provider", "baseUrl", "model", "inputPrice", "outputPrice", "contentBudget"])
     form.elements[key].value = settings[key] ?? "";
-  const custom = settings.provider === "compatible";
-  $("#model-endpoint").hidden = $("#model-endpoint-help").hidden = !custom;
-  form.elements.baseUrl.disabled = !custom;
   form.elements.apiKey.value = "";
   form.elements.apiKey.placeholder = settings.credentialPresent ? "已保存，留空保留原密钥" : "填写自己的 API Key";
   $("#model-status").textContent = settings.credentialPresent ? "本机已保存密钥；保存配置可恢复出题。" : "尚未配置自己的模型。";
@@ -517,8 +514,7 @@ $("#model-form").addEventListener("submit", async event => {
   $("#model-error").textContent = "";
   try {
     const provider = form.elements.provider.value;
-    await api("model-settings", { provider, baseUrl: provider === "compatible" ? form.elements.baseUrl.value.trim() :
-      modelConfiguration.presets[provider].baseUrl,
+    await api("model-settings", { provider, baseUrl: form.elements.baseUrl.value.trim(),
       model: form.elements.model.value.trim(), apiKey: form.elements.apiKey.value.trim(),
       inputPrice: Number(form.elements.inputPrice.value), outputPrice: Number(form.elements.outputPrice.value),
       contentBudget: Number(form.elements.contentBudget.value) });

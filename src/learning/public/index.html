@@ -27,9 +27,9 @@
     <form id="model-form" class="dialog-inner model-form">
       <div class="panel-title"><h2 id="model-title">模型配置</h2><button type="button" id="model-close" class="quiet" aria-label="关闭模型配置">关闭</button></div>
       <p id="model-status" class="tiny-note"></p>
-      <label>模型供应商<select name="provider" aria-label="模型供应商"><option value="qwen">百炼（北京）</option><option value="doubao">豆包（北京）</option><option value="compatible">其他兼容接口（OpenAI 格式）</option></select></label>
-      <label id="model-endpoint" hidden>API 地址（Base URL）<input name="baseUrl" type="url" maxlength="2048" required disabled placeholder="https://你的服务地址/v1"></label>
-      <p id="model-endpoint-help" class="tiny-note" hidden>填写供应商提供的 Base URL，不包含末尾的 /chat/completions。接口需支持图片输入及 Chat Completions。</p>
+      <label>模型供应商<select name="provider" aria-label="模型供应商"><option value="qwen">百炼</option><option value="doubao">豆包</option><option value="compatible">其他兼容接口（OpenAI 格式）</option></select></label>
+      <label id="model-endpoint">API 地址（Base URL）<input name="baseUrl" type="url" maxlength="2048" required placeholder="https://你的服务地址/v1"></label>
+      <p id="model-endpoint-help" class="tiny-note">百炼和豆包预填北京地址，可替换为控制台提供的地域或业务空间地址。地址需与密钥匹配，且不包含末尾的 /chat/completions。</p>
       <label>API Key<input name="apiKey" type="password" autocomplete="new-password" maxlength="512" placeholder="填写自己的 API Key"></label>
       <label>模型名称 / 接入点 ID<input name="model" required maxlength="128"></label>
       <p class="tiny-note">模型需支持图片理解和文字出题。百炼默认使用 qwen-vl-plus；豆包填写支持图片的接入点；其他接口填写对应模型名称。</p>

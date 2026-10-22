@@ -13,10 +13,6 @@ export const modelPresets = {
 };
 function validateEndpoint(provider, value) {
   if (!Object.hasOwn(modelPresets, provider)) throw new Error("请选择有效的接口类型");
-  if (provider !== "compatible") {
-    if (value !== modelPresets[provider].baseUrl) throw new Error("请选择对应供应商的官方接口地址");
-    return value;
-  }
   let url;
   try {
     if (typeof value !== "string" || value.length > 2048) throw new Error();
@@ -84,6 +80,8 @@ export function modelSettings(dataDir, baseEnv) {
         throw new Error("请填写有效模型名称或接入点 ID");
       const previous = configuredModels(dataDir, baseEnv).question;
       if (typeof input.apiKey !== "string") throw new Error("密钥格式无效");
+      if (!input.apiKey.trim() && previous.apiKey && previous.baseUrl !== baseUrl)
+        throw new Error("API 地址已更换，请填写该地址对应的 API Key");
       const apiKey = input.apiKey.trim() || (previous.provider === provider &&
         previous.baseUrl === baseUrl ? previous.apiKey : "");
       const validKey = provider === "compatible" ? /^[\x21-\x7E]{1,512}$/.test(apiKey) :

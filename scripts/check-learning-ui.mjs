@@ -261,6 +261,10 @@ try {
     await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.getByRole("heading", { name: "模型配置", exact: true }).waitFor();
+    assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).inputValue(),
+      "https://dashscope.aliyuncs.com/compatible-mode/v1");
+    const changedEndpoint = "https://workspace.example.org/compatible-mode/v1";
+    await page.getByLabel("API 地址（Base URL）", { exact: true }).fill(changedEndpoint);
     assert.equal(await page.locator("#model-form input[name=apiKey]").getAttribute("type"), "password");
     await page.getByLabel("API Key", { exact: true }).fill("synthetic-ui-model-key-only");
     assert.equal(await page.getByLabel("模型名称 / 接入点 ID", { exact: true }).inputValue(), "qwen-vl-plus");
@@ -272,6 +276,7 @@ try {
     await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.locator("#model-status").filter({ hasText: "本机已保存密钥" }).waitFor();
+    assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).inputValue(), changedEndpoint);
     assert.equal(await page.getByLabel("API Key", { exact: true }).inputValue(), "");
     await page.getByRole("button", { name: "关闭模型配置", exact: true }).click();
     for (let i = 0; i < 100; i++) {
@@ -286,7 +291,8 @@ try {
     for (const provider of ["doubao", "qwen", "compatible"]) {
       await page.getByLabel("模型供应商", { exact: true }).selectOption(provider);
       assert.equal(await page.locator("#model-form details").evaluate(el => el.open), false);
-      assert.equal(await page.locator("#model-endpoint").isVisible(), provider === "compatible");
+      assert.equal(await page.locator("#model-endpoint").isVisible(), true);
+      assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).isEditable(), true);
     }
     await page.getByLabel("API 地址（Base URL）", { exact: true }).fill("https://models.example.org/v1/");
     await page.getByLabel("API Key", { exact: true }).fill("synthetic-custom-model-key-only");

@@ -33,16 +33,35 @@ test("model settings persist privately, do not echo credentials, and supply both
   assert.equal(configuredModels(dir, {}).question.apiKey, key);
   assert.equal(configuredModels(dir, {}).question.model, "qwen-vl-plus-latest");
 });
-test("reject wrong provider endpoints, invalid price/budget and credential reuse across providers", async t => {
+test("reject invalid endpoint formats, price/budget and credential reuse across providers", async t => {
   const dir = await fixture(t), manager = modelSettings(dir, {});
   await manager.save(input);
   const before = await readFile(join(dir, "model-settings.json"), "utf8");
-  await assert.rejects(manager.save({ ...input, baseUrl: "https://example.com/v1" }), /官方接口/);
+  await assert.rejects(manager.save({ ...input, baseUrl: "https://example.com/v1?key=test" }), /API 地址/);
   await assert.rejects(manager.save({ ...input, inputPrice: -1 }), /单价/);
   await assert.rejects(manager.save({ ...input, contentBudget: .001 }), /预算/);
   await assert.rejects(manager.save({ ...input, provider: "doubao",
     baseUrl: modelPresets.doubao.baseUrl, apiKey: "" }), /API Key/);
   assert.equal(await readFile(join(dir, "model-settings.json"), "utf8"), before);
+});
+test("built-in supplier URLs are editable defaults; new addresses persist without reusing saved credentials", async t => {
+  for (const provider of ["qwen", "doubao"]) {
+    const dir = await fixture(t), manager = modelSettings(dir, {});
+    const initial = { ...input, provider, baseUrl: modelPresets[provider].baseUrl };
+    await manager.save(initial);
+    const baseUrl = `https://workspace-${provider}.example.org/v1`;
+    await assert.rejects(manager.save({ ...initial, baseUrl, apiKey: "" }), /地址已更换/);
+    assert.equal(manager.status().baseUrl, initial.baseUrl);
+    const replacement = "synthetic-replacement-api-key";
+    await manager.save({ ...initial, baseUrl, apiKey: replacement });
+    const models = configuredModels(dir, {});
+    assert.equal(models.content.visionBaseUrl, baseUrl);
+    assert.equal(models.question.baseUrl, baseUrl);
+    assert.equal(models.question.apiKey, replacement);
+    assert.equal(modelSettings(dir, {}).status().baseUrl, baseUrl);
+    await manager.save({ ...initial, baseUrl, apiKey: "" });
+    assert.equal(configuredModels(dir, {}).question.apiKey, replacement);
+  }
 });
 test("model settings refuse symlinks", async t => {
   const dir = await fixture(t);
