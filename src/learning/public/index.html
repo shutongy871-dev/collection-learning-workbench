@@ -13,7 +13,10 @@
     <header class="topbar">
       <div class="top-actions">
         <span id="today-date"></span>
-        <button id="refresh" class="quiet" title="手动同步抖音收藏、分类并更新学习库">↻ 同步并分类</button>
+        <div class="sync-action">
+          <button id="refresh" class="quiet" aria-describedby="sync-hint" title="手动同步抖音收藏、分类并更新学习库">↻ 同步并分类</button>
+          <small id="sync-hint">预计用时2分钟，请耐心等待</small>
+        </div>
         <button id="account-login" class="secondary connection-cta" title="打开抖音登录窗口，扫码后自动确认登录" disabled>正在读取抖音登录状态…</button>
         <button id="model-open" class="secondary" title="配置出题模型、API 地址、密钥和费用；保存后开始准备题目">模型配置</button>
       </div>
