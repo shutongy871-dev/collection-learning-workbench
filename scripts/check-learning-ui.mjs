@@ -117,29 +117,28 @@ const check = async (name, fn) => { await fn(); console.log(`✓ ${name}`); };
 try {
   await page.goto(origin);
   await page.getByRole("heading", { name: "让收藏，成为你的收获。" }).waitFor();
-  await check("账号菜单无检查按钮，扫码后自动连接并收起窗口，刷新后保留账号", async () => {
-    await page.getByLabel("抖音账号", { exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "同步时会自动确认账号" }).waitFor();
+  await check("顶部直接展示同步、登录和模型配置，扫码后自动切换已登录状态", async () => {
+    await page.getByRole("button", { name: "登录抖音（未登录无法同步）", exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "检查登录", exact: true }).count(), 0);
-    const buttons = await page.locator(".account-panel button").evaluateAll(elements =>
+    assert.equal(await page.locator(".account-menu, .account-panel").count(), 0);
+    const buttons = await page.locator(".top-actions button").evaluateAll(elements =>
       elements.map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
-    assert.equal(buttons.length, 2);
+    assert.equal(buttons.length, 3);
     for (const [i, rect] of buttons.entries()) {
       assert.ok(rect.height >= 42);
-      assert.equal(rect.x, buttons[0].x);
-      assert.equal(rect.width, buttons[0].width);
-      if (i) assert.ok(rect.y - buttons[i - 1].y - buttons[i - 1].height >= 10);
+      assert.equal(rect.y, buttons[0].y);
+      if (i) assert.ok(rect.x - buttons[i - 1].x - buttons[i - 1].width >= 12);
     }
-    await page.locator(".account-panel").screenshot({ path: join(output, "account-menu.png") });
-    await page.getByRole("button", { name: "登录抖音", exact: true }).click();
+    await page.locator(".topbar").screenshot({ path: join(output, "account-toolbar-unlogged.png") });
+    await page.getByRole("button", { name: "登录抖音（未登录无法同步）", exact: true }).click();
     await page.locator("#account-state").filter({ hasText: "请在专用窗口扫码" }).waitFor();
     loginChild.emit("message", { event: "login_ready" });
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 已连接" }).waitFor();
+    await page.getByRole("button", { name: "抖音已登录（支持数据同步）", exact: true }).waitFor();
     assert.equal(loginChild.exitCode, 0);
+    await page.locator(".topbar").screenshot({ path: join(output, "account-toolbar-logged.png") });
     await page.reload();
-    await page.getByLabel("抖音账号", { exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 已连接" }).waitFor();
-    await page.getByLabel("抖音账号", { exact: true }).click();
+    await page.getByRole("button", { name: "抖音已登录（支持数据同步）", exact: true }).waitFor();
+    assert.equal(await page.locator("#account-login").isEnabled(), true, "已登录时仍能主动重新登录");
   });
   await check("首页只保留刷题入口，不展示收藏标题或心得", async () => {
     assert.equal(await page.locator(".stat-value").first().textContent(), `${state.items.length.toLocaleString("zh-CN")}条`);
@@ -275,7 +274,6 @@ try {
     assert.equal(await page.locator("#refresh").isDisabled(), false);
   });
   await check("模型配置：隐藏输入、保存启动后台、重开不回显密钥，手机无溢出", async () => {
-    await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.getByRole("heading", { name: "模型配置", exact: true }).waitFor();
     assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).inputValue(),
@@ -290,7 +288,6 @@ try {
     await page.locator("#toast").filter({ hasText: "模型配置已保存" }).waitFor();
     assert.equal(await page.locator("#model-dialog").evaluate(d => d.open), false);
     assert.equal(await page.getByLabel("API Key", { exact: true }).inputValue(), "");
-    await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.locator("#model-status").filter({ hasText: "本机已保存密钥" }).waitFor();
     assert.equal(await page.getByLabel("API 地址（Base URL）", { exact: true }).inputValue(), changedEndpoint);
@@ -302,7 +299,6 @@ try {
     }
   });
   await check("供应商切换不展开费用；自定义接口可保存、重开回读且不回显密钥", async () => {
-    await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.locator("#model-dialog[open]").waitFor();
     for (const provider of ["doubao", "qwen", "compatible"]) {
@@ -321,7 +317,6 @@ try {
     await page.getByLabel("输出单价（元 / 百万 tokens）", { exact: true }).fill("2");
     await page.getByRole("button", { name: "保存并开始出题", exact: true }).click();
     await page.locator("#model-dialog:not([open])").waitFor({ state: "attached" });
-    await page.getByLabel("抖音账号", { exact: true }).click();
     await page.getByRole("button", { name: "模型配置", exact: true }).click();
     await page.locator("#model-dialog[open]").waitFor();
     assert.equal(await page.getByLabel("模型供应商", { exact: true }).inputValue(), "compatible");

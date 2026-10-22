@@ -37,15 +37,16 @@ dialog{border:1px solid #e0d8e8;padding:0;box-shadow:0 20px 100px #2f1d4330;colo
 @media(max-width:620px){.confidence{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-actions{align-items:stretch}.hero-actions>.primary{width:100%}.daily-goal{width:100%}.daily-goal label{flex:1}.hero small{display:block;margin:0;max-width:86%}}
 .workspace{margin-left:0}
 #toast{left:50%}
-.topbar{max-width:1510px;margin:0 auto;justify-content:flex-end}
+.topbar{max-width:1510px;margin:0 auto;justify-content:center;align-items:flex-end;flex-direction:column;gap:8px;height:auto;min-height:80px;padding-block:14px}
+.top-actions{justify-content:flex-end;flex-wrap:wrap;gap:12px}
+.top-actions button{height:42px;min-height:42px;white-space:nowrap}
+.top-actions #today-date{margin-right:6px}
+.connection-cta[data-status="verified"]{background:#edf3e7;border-color:#d3e0c6;color:var(--green)}
+.account-feedback{font-size:12px;line-height:1.7;color:var(--muted);text-align:right;overflow-wrap:anywhere}
+.account-feedback[hidden]{display:none}
+@media(max-width:620px){.top-actions{width:100%;gap:10px;justify-content:space-between}.top-actions #refresh{order:0}.top-actions #account-login{order:1;width:100%;font-size:12px}.top-actions #model-open{order:2;width:100%;font-size:12px}.top-actions #refresh{width:100%;text-align:right}.topbar{padding-block:12px}.account-feedback{text-align:left;width:100%}}
 .hero-actions{margin-top:0}
 .hero-actions>[data-action="start-today"]{min-height:52px;min-width:150px;padding:14px 26px;font-size:15px}
-.account-menu{position:relative}
-.account-menu summary{cursor:pointer;list-style:none}
-.account-menu summary::-webkit-details-marker{display:none}
-.account-panel{position:absolute;right:0;top:44px;width:260px;max-width:85vw;padding:18px;display:grid;gap:10px;background:white;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #43345220;z-index:10}
-.account-panel p{margin-bottom:4px;overflow-wrap:anywhere;font-size:12px;line-height:1.7}
-.account-panel button{width:100%;min-height:42px;margin:0}
 .model-form{display:grid;gap:14px}
 .model-form label{display:grid;gap:6px;font-size:13px}
 .model-form [hidden]{display:none}

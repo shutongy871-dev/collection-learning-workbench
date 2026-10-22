@@ -115,11 +115,11 @@ const contentErrors = { media_required: "还没有取得这条视频的媒体文
   browser_busy: "另一项收藏任务正在运行，请稍后恢复。",
   browser_background_unverified: "无法确认浏览器能静默运行，已暂停，请检查运行日志。",
   browser_audio_not_muted: "旧浏览器尚未启用静音，退出专用浏览器后再恢复任务。",
-  account_not_logged_in: "登录已失效，请在右上角「我」重新登录抖音，再恢复任务。",
+  account_not_logged_in: "登录已失效，请点击顶部「登录抖音」，再恢复任务。",
   account_changed: "当前登录账号与任务账号不同，请确认账号后再恢复。",
   platform_forbidden: "平台暂时限制访问，本批已暂停，请稍后手动处理。",
   platform_read_failed: "平台读取失败，本批已暂停，请查看运行日志后再恢复。",
-  self_page_ready_timeout: "平台暂未返回完整账号信息，请稍后重试；需要扫码时可在右上角「我」重新登录。",
+  self_page_ready_timeout: "平台暂未返回完整账号信息，请稍后重试；需要扫码时可点击顶部「登录抖音」。",
   vision_pricing_missing: "视觉模型的计费信息尚未配置。", asr_dependency_missing: "语音转写环境尚未就绪。",
   route_evidence_missing: "现有内容不足以确定处理方式。", no_audio_track: "视频中没有可用音轨。",
   budget_exceeded: "已停止后续模型调用，已完成的内容会保留。", call_outcome_unknown: "上次调用结果未知，已暂停自动重试。" };
@@ -403,9 +403,9 @@ let syncTimer, syncObservedActive = false;
 function syncError(code = "") {
   if (/account_check_busy/.test(code)) return "正在检查抖音登录，请稍等几秒后再同步。";
   if (/logged_in_account_required|account_not_logged_in|self_page_ready_timeout|login_browser_required/.test(code))
-    return "暂时无法确认抖音登录。请在右上角「我」重新登录，再点击同步。";
+    return "暂时无法确认抖音登录。请点击顶部「登录抖音」，再点击同步。";
   if (/another_run|collection_busy|ELOCKED/.test(code)) return "其他收藏任务正在运行，请稍后重试。";
-  if (/account_not_bound/.test(code)) return "请在右上角「我」登录抖音，系统会自动完成账号连接，再同步分类。";
+  if (/account_not_bound/.test(code)) return "请点击顶部「登录抖音」，系统会自动完成账号连接，再同步分类。";
   if (/account_changed|account_mismatch/.test(code)) return "账号与已绑定账号不一致，请先核对账号。";
   if (/visible_browser/.test(code)) return contentErrors.visible_browser_in_use;
   return contentErrors[code] || "同步分类已暂停，请查看本机任务日志；如需登录或验证，完成后可再次点击。";
@@ -426,6 +426,7 @@ async function loadSync() {
     } else if (syncObservedActive) {
       syncObservedActive = false;
       await reload();
+      void loadAccount();
       toast(["completed", "partial"].includes(job.status) ? "收藏已同步并分类，学习库已更新" : syncError(job.error));
     }
   } catch {
@@ -442,9 +443,9 @@ $("#refresh").addEventListener("click",async()=>{
   } catch(err) { $("#refresh").disabled=false;toast(syncError(err.message)); }
 });
 void loadSync();
-let accountTimer, loginObservedPending = false;
+let accountTimer, accountBusy = false, loginObservedPending = false;
 function renderAccount(account) {
-  const verified = account.status === "verified";
+  const verified = account.status === "verified", pending = account.status === "login_pending";
   $("#account-state").textContent = verified ?
     `${account.nickname || "抖音账号"} · 已连接（${dateText(account.checkedAt)}）` :
     account.status === "login_pending" ? "请在专用窗口扫码，登录成功后会自动收起窗口。" :
@@ -454,10 +455,17 @@ function renderAccount(account) {
       "暂时无法确认登录，请稍后点击「重试连接」。" :
     account.status === "unavailable" ? "暂时无法读取账号信息，请确认本地服务正在运行。" :
     "同步时会自动确认账号；需要扫码时请登录抖音。";
-  $("#account-login").textContent = account.status === "login_error" ? "重试连接" : "登录抖音";
-  $(".account-menu summary").textContent = verified ? (account.nickname || "我").slice(0, 1) : "我";
-  $(".account-menu summary").title = $("#account-state").textContent;
+  $("#account-state").hidden = verified || account.status === "unverified";
+  const loginButton = $("#account-login");
+  loginButton.textContent = verified ? "抖音已登录（支持数据同步）" :
+    pending ? "正在登录抖音（请在窗口扫码）" :
+    account.status === "unavailable" ? "登录抖音（状态暂不可用）" :
+    account.status === "login_error" ? "重试连接（暂时无法同步）" : "登录抖音（未登录无法同步）";
+  loginButton.dataset.status = account.status;
+  loginButton.disabled = accountBusy || pending;
+  loginButton.title = `${$("#account-state").textContent}${verified ? "；点击可重新登录。" : ""}`;
   clearTimeout(accountTimer);
+  accountTimer = undefined;
   if (account.status === "login_pending" || account.status === "login_error") {
     loginObservedPending = true;
     accountTimer = setTimeout(() => void loadAccount(), 2000);
@@ -467,29 +475,29 @@ function renderAccount(account) {
     loginObservedPending = false;
     if (verified) toast("抖音已连接，登录窗口已自动收起。");
   }
+  if (!accountTimer) accountTimer = setTimeout(() => void loadAccount(), 15000);
 }
 async function loadAccount() {
   renderAccount(await api("account").catch(() => ({ status: "unavailable" })));
 }
 async function accountAction(path) {
+  accountBusy = true;
   $("#account-login").disabled = true;
   try { renderAccount(await api(path, {})); }
   catch (error) {
     renderAccount(await api("account").catch(() => ({ status: "unavailable" })));
     toast(syncError(error.message));
   }
-  finally { $("#account-login").disabled = false; }
+  finally {
+    accountBusy = false;
+    const status = $("#account-login").dataset.status;
+    $("#account-login").disabled = status === "login_pending";
+  }
 }
 $("#account-login").addEventListener("click", () => void accountAction("account/login"));
-$(".account-menu").addEventListener("toggle", () => { if ($(".account-menu").open) void loadAccount(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void loadAccount(); });
 void loadAccount();
-const modelButton = document.createElement("button");
-modelButton.type = "button";
-modelButton.className = "secondary";
-modelButton.id = "model-open";
-modelButton.textContent = "模型配置";
-modelButton.title = "配置出题模型、API 地址、密钥和费用；保存后开始准备题目";
-$(".account-panel").append(modelButton);
+const modelButton = $("#model-open");
 let modelConfiguration;
 function fillModelFields(settings) {
   const form = $("#model-form");
@@ -505,7 +513,6 @@ async function openModelConfiguration() {
     fillModelFields(modelConfiguration);
     $("#model-form details").open = false;
     $("#model-error").textContent = "";
-    $(".account-menu").open = false;
     if (!$("#model-dialog").open) $("#model-dialog").showModal();
   } catch { toast("暂时无法读取模型配置，请稍后重试。"); }
 }
