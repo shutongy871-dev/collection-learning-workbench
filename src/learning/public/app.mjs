@@ -111,15 +111,15 @@ const contentStatuses = { completed: "处理完成", needs_review: "需要核对
   needs_configuration: "等待处理服务配置", budget_exceeded: "已达到处理预算", needs_reconciliation: "等待核对调用结果",
   blocked: "处理暂停", running: "正在处理", partial: "部分完成", skipped: "已跳过", interrupted: "中断，等待手动恢复" };
 const contentErrors = { media_required: "还没有取得这条视频的媒体文件。", vision_not_configured: "视觉模型尚未配置。",
-  visible_browser_in_use: "抖音登录程序还未退出，同步未开始。请在右上角「我」点击「检查登录」，然后再次同步。",
+  visible_browser_in_use: "抖音窗口仍被占用，同步未开始。请完成扫码并等待窗口自动收起；若已手动关闭窗口，请稍后重试同步。",
   browser_busy: "另一项收藏任务正在运行，请稍后恢复。",
   browser_background_unverified: "无法确认浏览器能静默运行，已暂停，请检查运行日志。",
   browser_audio_not_muted: "旧浏览器尚未启用静音，退出专用浏览器后再恢复任务。",
-  account_not_logged_in: "登录已失效。方便时运行 npm run browser 重新登录，完成后退出专用浏览器再恢复。",
+  account_not_logged_in: "登录已失效，请在右上角「我」重新登录抖音，再恢复任务。",
   account_changed: "当前登录账号与任务账号不同，请确认账号后再恢复。",
   platform_forbidden: "平台暂时限制访问，本批已暂停，请稍后手动处理。",
   platform_read_failed: "平台读取失败，本批已暂停，请查看运行日志后再恢复。",
-  self_page_ready_timeout: "平台未返回完整登录信息。请稍后检查登录或验证状态，再恢复任务。",
+  self_page_ready_timeout: "平台暂未返回完整账号信息，请稍后重试；需要扫码时可在右上角「我」重新登录。",
   vision_pricing_missing: "视觉模型的计费信息尚未配置。", asr_dependency_missing: "语音转写环境尚未就绪。",
   route_evidence_missing: "现有内容不足以确定处理方式。", no_audio_track: "视频中没有可用音轨。",
   budget_exceeded: "已停止后续模型调用，已完成的内容会保留。", call_outcome_unknown: "上次调用结果未知，已暂停自动重试。" };
@@ -405,7 +405,7 @@ function syncError(code = "") {
   if (/logged_in_account_required|account_not_logged_in|self_page_ready_timeout|login_browser_required/.test(code))
     return "暂时无法确认抖音登录。请在右上角「我」重新登录，再点击同步。";
   if (/another_run|collection_busy|ELOCKED/.test(code)) return "其他收藏任务正在运行，请稍后重试。";
-  if (/account_not_bound/.test(code)) return "请先完成本机账号绑定，再同步分类。";
+  if (/account_not_bound/.test(code)) return "请在右上角「我」登录抖音，系统会自动完成账号连接，再同步分类。";
   if (/account_changed|account_mismatch/.test(code)) return "账号与已绑定账号不一致，请先核对账号。";
   if (/visible_browser/.test(code)) return contentErrors.visible_browser_in_use;
   return contentErrors[code] || "同步分类已暂停，请查看本机任务日志；如需登录或验证，完成后可再次点击。";
@@ -442,28 +442,47 @@ $("#refresh").addEventListener("click",async()=>{
   } catch(err) { $("#refresh").disabled=false;toast(syncError(err.message)); }
 });
 void loadSync();
+let accountTimer, loginObservedPending = false;
 function renderAccount(account) {
   const verified = account.status === "verified";
   $("#account-state").textContent = verified ?
-    `${account.nickname || "抖音账号"} · 上次检查已登录（${dateText(account.checkedAt)}）` :
-    account.status === "login_pending" ? "请在专用窗口扫码，完成后点击检查登录。" :
-    account.status === "unavailable" ? "暂时无法读取登录状态，请确认本地服务正在运行。" :
-    "尚未确认抖音登录，可点击「检查登录」。";
+    `${account.nickname || "抖音账号"} · 已连接（${dateText(account.checkedAt)}）` :
+    account.status === "login_pending" ? "请在专用窗口扫码，登录成功后会自动收起窗口。" :
+    account.status === "login_error" ? account.error === "account_changed" ?
+      "扫码账号与学习库不一致，请在登录窗口切换为原账号。" :
+      account.error === "platform_forbidden" ? "抖音暂时限制访问，请稍后再试。" :
+      "暂时无法确认登录，请稍后点击「重试连接」。" :
+    account.status === "unavailable" ? "暂时无法读取账号信息，请确认本地服务正在运行。" :
+    "同步时会自动确认账号；需要扫码时请登录抖音。";
+  $("#account-login").textContent = account.status === "login_error" ? "重试连接" : "登录抖音";
   $(".account-menu summary").textContent = verified ? (account.nickname || "我").slice(0, 1) : "我";
   $(".account-menu summary").title = $("#account-state").textContent;
+  clearTimeout(accountTimer);
+  if (account.status === "login_pending" || account.status === "login_error") {
+    loginObservedPending = true;
+    accountTimer = setTimeout(() => void loadAccount(), 2000);
+  } else if (loginObservedPending && account.status === "unavailable") {
+    accountTimer = setTimeout(() => void loadAccount(), 4000);
+  } else if (loginObservedPending) {
+    loginObservedPending = false;
+    if (verified) toast("抖音已连接，登录窗口已自动收起。");
+  }
+}
+async function loadAccount() {
+  renderAccount(await api("account").catch(() => ({ status: "unavailable" })));
 }
 async function accountAction(path) {
-  $("#account-login").disabled = $("#account-check").disabled = true;
+  $("#account-login").disabled = true;
   try { renderAccount(await api(path, {})); }
-  catch {
+  catch (error) {
     renderAccount(await api("account").catch(() => ({ status: "unavailable" })));
-    toast("无法完成账号操作，请确认专用登录窗口已就绪，且没有其他收藏任务正在运行。");
+    toast(syncError(error.message));
   }
-  finally { $("#account-login").disabled = $("#account-check").disabled = false; }
+  finally { $("#account-login").disabled = false; }
 }
 $("#account-login").addEventListener("click", () => void accountAction("account/login"));
-$("#account-check").addEventListener("click", () => void accountAction("account/check"));
-api("account").then(renderAccount).catch(() => renderAccount({ status: "unavailable" }));
+$(".account-menu").addEventListener("toggle", () => { if ($(".account-menu").open) void loadAccount(); });
+void loadAccount();
 const modelButton = document.createElement("button");
 modelButton.type = "button";
 modelButton.className = "secondary";

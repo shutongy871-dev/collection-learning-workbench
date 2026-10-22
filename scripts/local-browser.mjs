@@ -22,6 +22,7 @@ context.setDefaultTimeout(15_000);
 const page = context.pages()[0] ?? await context.newPage();
 const runId = new Date().toISOString().replace(/[:.]/g, "-");
 const records = [];
+let loginReadyAccount;
 let pendingWrite = Promise.resolve();
 const keys = [
   "status_code", "status_msg", "has_more", "cursor", "max_cursor", "min_cursor", "total",
@@ -50,6 +51,16 @@ context.on("response", async (response) => {
     const data = await response.json();
     entry.keys = Object.keys(data);
     entry.data = project(data);
+    // Observe login completion without refreshing the QR page or polling the
+    // platform. Only notify the parent; it independently reads and binds identity.
+    const uid = typeof data.user?.uid === "string" ? data.user.uid :
+      Number.isSafeInteger(data.user?.uid) ? String(data.user.uid) : null;
+    if (loginMode && process.connected && u.pathname.endsWith("/user/profile/self/") &&
+        response.status() === 200 && data.status_code === 0 && uid && uid !== "0" &&
+        uid !== loginReadyAccount) {
+      loginReadyAccount = uid;
+      process.send({ event: "login_ready" }, () => {});
+    }
   } catch {
     entry.error = "response_not_json";
   }
@@ -98,11 +109,11 @@ const server = createServer(async (req, res) => {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.end(`<!doctype html><html lang="zh"><meta charset="utf-8"><title>本地收藏整理 · 登录</title>
         <style>html{background:#fff;color:#17202a}body{font:16px system-ui;max-width:1050px;margin:24px auto;padding:0 20px}img{max-width:100%}button,a{margin-right:16px}</style>
-        <h1>本地浏览器登录</h1><p>扫码登录抖音后，点击“检查登录”。登录状态仅保存在这台电脑。</p>
+        <h1>本地浏览器登录</h1><p>扫码登录抖音后，学习工具会自动确认并收起登录窗口。登录状态仅保存在这台电脑。</p>
         <p>已确认入夹：${progress.verified} 条。${progress.active ? "正在整理，请勿操作执行窗口。" : "当前没有执行中的归类任务。"}</p>
         ${progress.audit?.passed ? `<p>最近一次完整验收通过：未分类 ${progress.audit.unclassified} 条；平台失效内容 ${progress.audit.invalidCount} 条。</p>` : ""}
         <p>这是当前本地 Chrome 窗口的实时截图。此入口不会移动或取消收藏。</p>
-        <form method="post" action="/refresh?csrf=${csrf}"><button ${progress.active ? "disabled" : ""}>检查登录</button><a href="/">刷新画面</a></form>
+        <form method="post" action="/refresh?csrf=${csrf}"><button ${progress.active ? "disabled" : ""}>重新打开抖音</button><a href="/">刷新画面</a></form>
         <img src="/screen.png" alt="本地抖音浏览器当前画面"></html>`);
     } else if (req.method === "GET" && url.pathname === "/screen.png") {
       res.setHeader("Content-Type", "image/png");

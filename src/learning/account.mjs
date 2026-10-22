@@ -32,18 +32,22 @@ export function accountManager({ dataDir, store, readAccount = () => readCurrent
     cwd: root, env: { ...runtimeEnvironment(), COLLECTION_BROWSER_DIR: resolve(dataDir, "local-browser") },
     stdio: ["ignore", "ignore", "ignore", "ipc"]
   }) }) {
-  let child, operation = false;
+  let child, operation = false, automaticCheck, loginError;
   const file = join(dataDir, "account-status.json");
   async function status() {
     const verified = await readJson(file, null);
     const config = await readJson(join(dataDir, "daily", "config.json"), null);
-    if (child && child.exitCode === null && child.signalCode === null) return { status: "login_pending" };
+    if (child && child.exitCode === null && child.signalCode === null)
+      return loginError ? { status: "login_error", error: loginError } : { status: "login_pending" };
     if (!verified || verified.accountId !== config?.accountId) return { status: "unverified" };
     return { status: verified.status, nickname: verified.nickname, checkedAt: verified.checkedAt };
   }
   async function login() {
     if (operation) throw new Error("account_check_busy");
-    if (child && child.exitCode === null && child.signalCode === null) return { status: "login_pending" };
+    if (child && child.exitCode === null && child.signalCode === null) {
+      if (loginError) return check();
+      return { status: "login_pending" };
+    }
     operation = true;
     let lock;
     try {
@@ -58,9 +62,16 @@ export function accountManager({ dataDir, store, readAccount = () => readCurrent
         if (browser) { await browser.close(); throw new Error("browser_busy"); }
       }
       await putJson(file, { status: "unverified" });
+      loginError = undefined;
       const launched = launchLogin();
       child = launched;
       child.once("error", () => { if (child === launched) child = undefined; });
+      // The owned login browser signals a trusted live response. Re-read the
+      // current identity before binding; never trust account fields from IPC.
+      child.on("message", message => {
+        if (message?.event !== "login_ready" || child !== launched || operation || automaticCheck) return;
+        automaticCheck = check().catch(() => {}).finally(() => { automaticCheck = undefined; });
+      });
       return { status: "login_pending" };
     } finally { await lock?.release(); operation = false; }
   }
@@ -78,17 +89,22 @@ export function accountManager({ dataDir, store, readAccount = () => readCurrent
       const verified = { status: "verified", accountId: config.accountId, nickname: config.accountName,
         checkedAt: config.at };
       await putJson(file, verified);
+      loginError = undefined;
       await closeBrowserChild(child);
       child = undefined;
       return { status: verified.status, nickname: verified.nickname, checkedAt: verified.checkedAt };
     } catch (e) {
+      loginError = /account_changed/.test(e.message) ? "account_changed" :
+        /platform_forbidden/.test(e.message) ? "platform_forbidden" : "login_read_failed";
       // A failed current read must never display a previously verified account as logged in.
       await putJson(file, { status: "unverified", checkedAt: new Date().toISOString() });
       throw e;
     } finally { operation = false; }
   }
   async function prepareForSync() {
+    if (automaticCheck) await automaticCheck;
     if (operation) throw new Error("account_check_busy");
+    if (loginError === "platform_forbidden") throw new Error("platform_forbidden");
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     // Only stop the login child owned by this server. Never close daily Chrome.
     operation = true;
@@ -103,5 +119,8 @@ export function accountManager({ dataDir, store, readAccount = () => readCurrent
     } finally { operation = false; }
     if (hasPages) await check(); // Live identity proof before ending an active login session.
   }
-  return { status, login, check, prepareForSync, close: () => closeBrowserChild(child) };
+  return { status, login, check, prepareForSync, close: async () => {
+    if (automaticCheck) await automaticCheck;
+    await closeBrowserChild(child);
+  } };
 }

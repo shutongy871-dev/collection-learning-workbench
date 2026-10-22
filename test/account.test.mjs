@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { accountManager } from "../src/learning/account.mjs";
 import { learningStore } from "../src/learning/store.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
@@ -21,6 +22,63 @@ function fakeChild() {
     send: () => { child.exitCode = 0; queueMicrotask(() => child.emit("exit", 0)); } });
   return child;
 }
+async function waitForLogin(manager, expected) {
+  for (let i = 0; i < 100; i++) {
+    const result = await manager.status();
+    if (result.status === expected) return result;
+    await delay(10);
+  }
+  assert.fail(`login did not reach ${expected}`);
+}
+test("login-ready signal automatically binds a fresh read and closes only the owned browser", async t => {
+  const f = await fixture(t), child = fakeChild();
+  let reads = 0, finishRead;
+  const gate = new Promise(resolve => { finishRead = resolve; });
+  const manager = accountManager({ ...f, launchLogin: () => child,
+    readAccount: async () => { reads++; await gate; return { id: "synthetic-auto", nickname: "自动连接" }; } });
+  await manager.login();
+  child.emit("message", { event: "unrelated" });
+  assert.equal(reads, 0);
+  child.emit("message", { event: "login_ready", accountId: "must-not-trust-ipc" });
+  child.emit("message", { event: "login_ready" });
+  // Sync waits for the in-flight automatic read instead of reporting busy.
+  const syncing = manager.prepareForSync();
+  finishRead();
+  await syncing;
+  const result = await waitForLogin(manager, "verified");
+  assert.equal(reads, 1);
+  assert.equal(result.nickname, "自动连接");
+  assert.equal(child.exitCode, 0);
+  assert.equal(JSON.stringify(result).includes("synthetic-auto"), false);
+});
+test("automatic login rejects another account and keeps the window available for correction", async t => {
+  const f = await fixture(t), child = fakeChild();
+  await f.store.mutate(s => { s.sources = [{ platform: "douyin", accountId: "synthetic-original" }]; });
+  let current = { id: "synthetic-other", nickname: "其他账号" };
+  const manager = accountManager({ ...f, launchLogin: () => child, readAccount: async () => current });
+  await manager.login();
+  child.emit("message", { event: "login_ready" });
+  assert.deepEqual(await waitForLogin(manager, "login_error"), { status: "login_error", error: "account_changed" });
+  assert.equal(child.exitCode, null);
+  current = { id: "synthetic-original", nickname: "原账号" };
+  child.emit("message", { event: "login_ready" });
+  assert.equal((await waitForLogin(manager, "verified")).nickname, "原账号");
+  assert.equal(child.exitCode, 0);
+});
+test("automatic login stops on platform restrictions without retrying on status reads or sync", async t => {
+  const f = await fixture(t), child = fakeChild();
+  let reads = 0;
+  const manager = accountManager({ ...f, launchLogin: () => child,
+    readAccount: async () => { reads++; throw new Error("platform_forbidden"); } });
+  await manager.login();
+  child.emit("message", { event: "login_ready" });
+  assert.deepEqual(await waitForLogin(manager, "login_error"), { status: "login_error", error: "platform_forbidden" });
+  await manager.status();
+  await assert.rejects(manager.prepareForSync(), /platform_forbidden/);
+  assert.equal(reads, 1);
+  assert.equal(child.exitCode, null);
+  await manager.close();
+});
 test("fresh account: login is idempotent; current read binds account and exposes only display fields", async t => {
   const f = await fixture(t);
   let launches = 0;

@@ -5,6 +5,7 @@ import { mkdir, writeFile, readFile, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { createServer } from "node:http";
+import { EventEmitter } from "node:events";
 import { importCollections } from "../src/learning/import.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
 import { dayKey } from "../src/learning/domain.mjs";
@@ -87,11 +88,14 @@ await atomicJSON(join(dataDir, "content-batch", "ledger.json"), {
   items: {}
 });
 let syncCalls = 0, finishSync;
+const loginChild = new EventEmitter();
+Object.assign(loginChild, { exitCode: null, signalCode: null, connected: true,
+  send: () => { loginChild.exitCode = 0; queueMicrotask(() => loginChild.emit("exit", 0)); } });
 const server = await startLearningServer({ dataDir, port: 0, importOnStart: false, getModelConfig: () => modelConfig,
   modelEnvironment: {},
   batchAdapters: { captureContent: async () => { throw new Error("ui_unexpected_media_acquisition"); } },
   accountAdapters: {
-    launchLogin: () => ({ exitCode: 0, signalCode: null, once() {} }),
+    launchLogin: () => loginChild,
     readAccount: async () => ({ id: "synthetic-ui-account", nickname: "测试使用者" })
   },
   classificationRunner: async () => {
@@ -113,12 +117,13 @@ const check = async (name, fn) => { await fn(); console.log(`✓ ${name}`); };
 try {
   await page.goto(origin);
   await page.getByRole("heading", { name: "让收藏，成为你的收获。" }).waitFor();
-  await check("右上角账号入口可发起登录、核验昵称并在刷新后保留", async () => {
+  await check("账号菜单无检查按钮，扫码后自动连接并收起窗口，刷新后保留账号", async () => {
     await page.getByLabel("抖音账号", { exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "尚未确认抖音登录" }).waitFor();
+    await page.locator("#account-state").filter({ hasText: "同步时会自动确认账号" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "检查登录", exact: true }).count(), 0);
     const buttons = await page.locator(".account-panel button").evaluateAll(elements =>
       elements.map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; }));
-    assert.equal(buttons.length, 3);
+    assert.equal(buttons.length, 2);
     for (const [i, rect] of buttons.entries()) {
       assert.ok(rect.height >= 42);
       assert.equal(rect.x, buttons[0].x);
@@ -128,11 +133,12 @@ try {
     await page.locator(".account-panel").screenshot({ path: join(output, "account-menu.png") });
     await page.getByRole("button", { name: "登录抖音", exact: true }).click();
     await page.locator("#account-state").filter({ hasText: "请在专用窗口扫码" }).waitFor();
-    await page.getByRole("button", { name: "检查登录", exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 上次检查已登录" }).waitFor();
+    loginChild.emit("message", { event: "login_ready" });
+    await page.locator("#account-state").filter({ hasText: "测试使用者 · 已连接" }).waitFor();
+    assert.equal(loginChild.exitCode, 0);
     await page.reload();
     await page.getByLabel("抖音账号", { exact: true }).click();
-    await page.locator("#account-state").filter({ hasText: "测试使用者 · 上次检查已登录" }).waitFor();
+    await page.locator("#account-state").filter({ hasText: "测试使用者 · 已连接" }).waitFor();
     await page.getByLabel("抖音账号", { exact: true }).click();
   });
   await check("首页只保留刷题入口，不展示收藏标题或心得", async () => {
