@@ -67,6 +67,34 @@ export function growthSeries(items, from, to) {
   return result;
 }
 
+/** SQL: filter current folder membership BEFORE COUNT(DISTINCT item_key) by day.
+ * Remove only leading days with cumulative=0; keep all later quiet days.
+ * Dates describe first local import, not the platform's collection timestamp. */
+export function collectionGrowthSeries(items, from, to, folderKey = "") {
+  const selected = folderKey === "unclassified" ? items.filter(i => !(i.folderKeys ?? []).length) :
+    folderKey ? items.filter(i => (i.folderKeys ?? []).includes(folderKey)) : items;
+  const series = growthSeries(selected, from, to);
+  const first = series.findIndex(day => day.total > 0);
+  return first < 0 ? [] : series.slice(first);
+}
+
+/** SQL: current folders LEFT JOIN memberships GROUP BY folder_key,
+ * COUNT(DISTINCT item_key). Multi-folder items count once in EACH folder.
+ * A separate unclassified bucket contains items with no current folder. */
+export function collectionFolderCounts(items, folders = []) {
+  const current = new Set(folders.map(f => f.key));
+  const counts = new Map(folders.map(f => [f.key, new Set()]));
+  const unclassified = new Set();
+  for (const item of items) {
+    const keys = [...new Set(item.folderKeys ?? [])].filter(key => current.has(key));
+    if (!keys.length) unclassified.add(item.key);
+    for (const key of keys) counts.get(key).add(item.key);
+  }
+  const rows = folders.map(f => ({ key: f.key, name: f.name, count: counts.get(f.key).size }));
+  if (unclassified.size) rows.push({ key: "unclassified", name: "未分类", count: unclassified.size });
+  return rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
+}
+
 export function validateQuestion(question, source) {
   if (!question || typeof question.prompt !== "string" || question.prompt.trim().length < 5 ||
       question.prompt.length > 500 || !Array.isArray(question.options) || question.options.length !== 4 ||

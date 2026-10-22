@@ -39,6 +39,16 @@ automaticItem.title = "自动出题验收原理讲解";
 automaticItem.description = "";
 automaticItem.hashtags = [];
 automaticItem.firstSeenAt = new Date(Date.now() + 1000).toISOString();
+state.folders = [
+  { key: "ui-folder-practice", id: "ui-practice", name: "摄影练习", platform: "douyin" },
+  { key: "ui-folder-reference", id: "ui-reference", name: "摄影参考", platform: "douyin" },
+  { key: "ui-folder-empty", id: "ui-empty", name: "空收藏夹", platform: "douyin" }
+];
+state.items[0].folderKeys = ["ui-folder-practice"];
+state.items[0].firstSeenAt = new Date(Date.now() - 9 * 86400000).toISOString();
+fixtureItem.folderKeys = ["ui-folder-practice", "ui-folder-reference"];
+fixtureItem.firstSeenAt = new Date(Date.now() - 3 * 86400000).toISOString();
+automaticItem.folderKeys = ["ui-folder-reference"];
 const fixtureEvidence = "浏览器测试摘录：学习时先主动回忆，再对照原文核对遗漏。";
 state.excerpts[fixtureItem.key] = fixtureEvidence;
 state.questions.push({ id: "ui-check-only", itemKey: fixtureItem.key, prompt: "按测试摘录，学习时首先做什么？",
@@ -170,6 +180,22 @@ try {
     assert.equal(await page.locator('a[href="#growth"]').count(), 0);
     assert.equal(await page.locator("[data-chart-day]").count(), 0);
     assert.equal(await page.getByText("留下心得", { exact: true }).count(), 0);
+  });
+  await check("趋势去掉入库前零线、支持真实收藏夹筛选，中间环形图独立展示数量和占比", async () => {
+    assert.equal(await page.locator(".insights-grid>.panel").count(), 3);
+    assert.equal(await page.locator(".insights-grid>.panel").nth(1).locator(".folder-pie").count(), 1);
+    assert.equal(await page.locator(".folder-legend li").count() >= 3, true);
+    const globalFirst = state.items.map(i => dayKey(i.firstSeenAt)).sort()[0];
+    assert.ok((await page.locator(".chart g[aria-label]").first().getAttribute("aria-label")).startsWith(globalFirst));
+    await page.getByLabel("趋势收藏夹").selectOption("ui-folder-reference");
+    await page.waitForFunction(() => document.querySelector(".chart-readout")?.textContent.includes("累计入库 2 条"));
+    assert.ok((await page.locator(".chart g[aria-label]").first().getAttribute("aria-label")).startsWith(dayKey(fixtureItem.firstSeenAt)));
+    assert.equal(await page.locator(".folder-legend li").count() >= 3, true);
+    await page.getByLabel("趋势收藏夹").selectOption("ui-folder-empty");
+    assert.equal(await page.locator(".trend-panel .chart").count(), 0);
+    assert.equal(await page.getByText("这个收藏夹还没有入库收藏。", { exact: true }).count(), 1);
+    await page.getByLabel("趋势收藏夹").selectOption("");
+    assert.equal(await page.locator(".trend-panel .chart").count(), 1);
   });
   await check("答题不展示来源标题、原收藏链接或心得", async () => {
     const item = fixtureItem, question = state.questions.find(q => q.itemKey === item.key);

@@ -1,4 +1,4 @@
-import { dayKey, growthSeries, learningStatus, dueQuestions, DAY } from "/domain.mjs";
+import { dayKey, collectionGrowthSeries, collectionFolderCounts, learningStatus, dueQuestions, DAY } from "/domain.mjs";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -6,7 +6,7 @@ const number = n => Number(n).toLocaleString("zh-CN");
 const sourceName = p => ({ douyin: "抖音" })[p] ?? "未知来源";
 const dateText = value => new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 const labels = { today: "今日学习" };
-let state, range = 30, chartMode = "total";
+let state, range = 30, chartMode = "total", trendFolder = "";
 let detailKey = null, quizItem = null, quizQuestion = null, choice = null, attemptId = null, feedback = null, quizFinished = false;
 let detailDirty = false, busy = false, toastTimer;
 const dirtyForms = new Set();
@@ -50,14 +50,12 @@ function chart(items, compact = false) {
   const to = dayKey(Date.now());
   const first = items.reduce((min, i) => dayKey(i.firstSeenAt) < min ? dayKey(i.firstSeenAt) : min, to);
   const from = range === 0 ? first : dayKey(Date.parse(`${to}T12:00:00+08:00`) - (range - 1) * DAY);
-  const series = growthSeries(items, from, to);
-  if (!series.length) return empty("这个时间范围没有数据", "请调整起止日期后再查看。");
+  const series = collectionGrowthSeries(items, from, to, compact ? trendFolder : "");
+  if (!series.length) return empty("暂无收藏趋势", trendFolder ? "这个收藏夹还没有入库收藏。" : "同步收藏后，趋势会从首次入库日期开始展示。");
   const mode = compact ? "total" : chartMode;
   const values = series.map(s => mode === "total" ? s.total : s.added + s.baseline);
-  const max = Math.max(...values, 1);
-  const mainWidth = $("#main").clientWidth - (innerWidth <= 620 ? 36 : innerWidth <= 1150 ? 50 : 84);
-  const plotWidth = compact && innerWidth > 900 ? (mainWidth - 20) * .62 - 44 : mainWidth - 44;
-  const width = Math.max(260, Math.min(650, plotWidth)), height = compact ? 185 : 230, left = 47, right = 12, top = 15, bottom = 32;
+  const max = Math.max(2, Math.ceil(Math.max(...values, 1) / 2) * 2);
+  const width = 440, height = 230, left = 47, right = 12, top = 15, bottom = 32;
   const pw = width - left - right, ph = height - top - bottom;
   const x = idx => left + (series.length === 1 ? pw / 2 : idx * pw / (series.length - 1));
   const y = n => top + ph - n / max * ph;
@@ -78,19 +76,52 @@ function chart(items, compact = false) {
     <div class="chart-legend"><span><i></i>${mode==="total"?"累计入库":"首次发现新增"}</span>${mode==="added"?'<span><i class="base"></i>历史导入</span>':""}<span>按北京时间统计</span></div>
     <div class="chart-readout" aria-live="polite">累计入库 ${number(latest.total)} 条 · 今日新入库 ${number(latest.added)} 条</div>`;
 }
+const folderColors = ["#9b83ba", "#91a87b", "#d1a175", "#7b9eae", "#c08ba0", "#aba36c",
+  "#8a8fbf", "#78a59a", "#bd9680", "#ae87a9", "#99abbd", "#b4a681", "#899783", "#b29ac2", "#b8b3bf"];
+function folderDistribution(items, rows) {
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  if (!total) return empty("暂无收藏分布", "同步收藏后，查看各收藏夹的数量和占比。");
+  const radius = 58, circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const slices = rows.map((row, i) => {
+    const length = row.count / total * circumference, color = folderColors[i % folderColors.length];
+    const mark = row.count ? `<circle cx="80" cy="80" r="${radius}" fill="none" stroke="${color}" stroke-width="22"
+      stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}">
+      <title>${esc(row.name)}：${row.count} 条，占 ${(row.count / total * 100).toFixed(1)}%</title></circle>` : "";
+    offset += length;
+    return mark;
+  }).join("");
+  return `<div class="folder-distribution"><svg class="folder-pie" viewBox="0 0 160 160" role="img" aria-label="收藏夹数量分布，合计 ${total} 条">
+    <g transform="rotate(-90 80 80)">${slices}</g>
+    <text class="pie-total" x="80" y="79" text-anchor="middle">${number(total)}</text>
+    <text class="pie-caption" x="80" y="98" text-anchor="middle">收藏夹条目</text></svg>
+    <ul class="folder-legend" aria-label="各收藏夹数量和占比" tabindex="0">${rows.map((row, i) => `<li>
+      <span class="folder-swatch" style="background:${folderColors[i % folderColors.length]}"></span>
+      <span class="folder-name" title="${esc(row.name)}">${esc(row.name)}</span>
+      <span class="folder-count">${number(row.count)} <small>条</small></span>
+      <span class="folder-percent">${(row.count / total * 100).toFixed(1)}%</span></li>`).join("")}</ul></div>
+    <p class="distribution-note">${total > new Set(items.map(i => i.key)).size ?
+      "同一收藏加入多个夹时，在各夹分别计数。" : "按已同步收藏的当前收藏夹归属统计。"}</p>`;
+}
 function heroArt() {
   return `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 200 180" fill="none"><ellipse cx="105" cy="93" rx="80" ry="61" stroke="#c9bdd7" stroke-dasharray="4 5"/><path d="M52 60l47-10 49 14v76l-48-13-48 11V60Z" fill="#faf8fd" stroke="#b8a5cb" stroke-width="1.5"/><path d="M99 50v77M64 77l23-5m-23 17 23-5m-23 17 23-5m26-20 24 6m-24 6 24 6m-24 6 17 4" stroke="#c7b9d6" stroke-width="2"/><circle cx="157" cy="45" r="19" fill="#dfe8be"/><path d="m150 45 5 5 9-10" stroke="#8c9b65" stroke-width="2"/><path d="m38 124 4 10 11 4-11 4-4 11-4-11-11-4 11-4Z" fill="#b7a2cf"/><circle cx="60" cy="29" r="4" fill="#c4b3d5"/><circle cx="170" cy="130" r="4" fill="#c4b3d5"/></svg></div>`;
 }
 function todayPage() {
   const items = state.items;
+  const folderRows = collectionFolderCounts(items, state.folders ?? []);
+  if (trendFolder && !folderRows.some(row => row.key === trendFolder)) trendFolder = "";
   const limit = state.learningConfig.dailyVideos;
   return `<div class="page-head"><h1>让收藏，成为你的收获。</h1></div>
     <section class="hero"><div class="hero-copy">
     <div class="hero-actions"><button class="primary" data-action="start-today">开始学习 <span>↗</span></button>
     <form id="learning-form" class="daily-goal"><label>每天学习 <input aria-label="每天学习视频数" name="dailyVideos" type="number" min="1" max="50" value="${limit}" required> 条视频</label><button class="secondary" type="submit">保存</button></form></div></div>${heroArt()}</section>
     ${stats(items)}
-    <div class="split"><section class="panel"><div class="panel-title"><h2>你的收藏，正在生长</h2></div>${chart(items,true)}</section>
-    <section class="panel"><div class="panel-title"><h2>把喜欢，变成自己的</h2><small>学习足迹</small></div>${learningFootprint(items)}</section></div>`;
+    <div class="insights-grid"><section class="panel trend-panel"><div class="panel-title"><h2>你的收藏，正在生长</h2></div>
+    <label class="folder-filter" for="trend-folder">收藏夹<select id="trend-folder" aria-label="趋势收藏夹">
+      <option value="">全部收藏夹</option>${folderRows.map(row => `<option value="${esc(row.key)}"${trendFolder === row.key ? " selected" : ""}>${esc(row.name)}（${row.count}）</option>`).join("")}
+    </select></label>${chart(items,true)}</section>
+    <section class="panel distribution-panel"><div class="panel-title"><h2>收藏夹分布</h2><small>数量与占比</small></div>${folderDistribution(items, folderRows)}</section>
+    <section class="panel footprint-panel"><div class="panel-title"><h2>把喜欢，变成自己的</h2><small>学习足迹</small></div>${learningFootprint(items)}</section></div>`;
 }
 function learningFootprint(items) {
   const total = items.length;
@@ -314,6 +345,13 @@ async function startToday() {
     await showPreparation(result, watch);
   } finally { startingLearning = false; }
 }
+
+$("#main").addEventListener("change", event => {
+  if (event.target.id !== "trend-folder") return;
+  trendFolder = event.target.value;
+  render();
+  $("#trend-folder").focus();
+});
 
 document.addEventListener("click",async e=>{
   const el=e.target.closest("button");if(!el||el.disabled)return;

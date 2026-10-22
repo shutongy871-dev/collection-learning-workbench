@@ -41,6 +41,24 @@ dialog{border:1px solid #e0d8e8;padding:0;box-shadow:0 20px 100px #2f1d4330;colo
 .top-actions{justify-content:flex-end;flex-wrap:wrap;gap:12px}
 .top-actions button{height:42px;min-height:42px;white-space:nowrap}
 .top-actions #today-date{margin-right:6px}
+.insights-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) minmax(0,.9fr);gap:20px;margin-top:24px}
+.folder-filter{display:flex;align-items:center;gap:10px;margin-bottom:18px;color:var(--muted);font-size:11px}
+.folder-filter select{flex:1;min-width:0;padding:7px 10px;font-size:11px}
+.folder-distribution{display:flex;align-items:center;gap:16px;min-height:230px}
+.folder-pie{display:block;width:132px;flex:0 0 132px}
+.pie-total{font:500 24px var(--font);fill:var(--ink)}
+.pie-caption{font:10px var(--font);fill:var(--muted)}
+.folder-legend{list-style:none;padding:0;margin:0;flex:1;min-width:0;max-height:260px;overflow:auto;scrollbar-width:thin}
+.folder-legend li{display:grid;grid-template-columns:8px minmax(0,1fr) auto 40px;align-items:center;gap:7px;padding:7px 0;font-size:11px}
+.folder-swatch{width:8px;height:8px;border-radius:50%}
+.folder-name{overflow-wrap:anywhere;line-height:1.5}
+.folder-count{white-space:nowrap;font-variant-numeric:tabular-nums}
+.folder-count small{font-size:10px;color:var(--muted)}
+.folder-percent{font-size:10px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.distribution-note{font-size:10px;line-height:1.7;color:var(--muted);margin-top:15px}
+@media(max-width:1150px){.insights-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.footprint-panel{grid-column:1/-1}}
+@media(max-width:900px){.insights-grid{grid-template-columns:minmax(0,1fr);gap:14px}.footprint-panel{grid-column:auto}}
+@media(max-width:420px){.folder-pie{width:112px;flex-basis:112px}.folder-distribution{gap:12px}.folder-legend li{column-gap:5px}}
 .connection-cta[data-status="verified"]{background:#edf3e7;border-color:#d3e0c6;color:var(--green)}
 .account-feedback{font-size:12px;line-height:1.7;color:var(--muted);text-align:right;overflow-wrap:anywhere}
 .account-feedback[hidden]{display:none}
