@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { browserLaunchOptions, removeOwnConnection } from "./browser-session.mjs";
+import { browserLaunchOptions, removeOwnConnection, stopLoginWhenPagesClose } from "./browser-session.mjs";
 
 // 独立浏览器配置目录；不读取、复制用户日常 Chrome 的 Cookie，不加载旧执行插件。
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -158,6 +158,9 @@ process.once("SIGINT", requestStop);
 process.on("message", message => { if (message?.action === "close") requestStop(); });
 process.once("disconnect", requestStop);
 context.once("close", requestStop);
+// macOS may keep Chrome alive after its last window closes. Release our login
+// profile at that point so the next background run does not see a phantom window.
+if (loginMode) stopLoginWhenPagesClose(context, requestStop);
 // 后台调用方安装采集监听后负责首次导航，避免 ready 后立即重复加载同一页面。
 if (!process.argv.includes("--defer-navigation")) {
   await page.goto("https://www.douyin.com/user/self?showTab=favorite_collection", { waitUntil: "domcontentloaded" });

@@ -4,6 +4,19 @@ import { resolve } from "node:path";
 
 const failure = code => Object.assign(new Error(code), { code });
 
+export function stopLoginWhenPagesClose(context, stop) {
+  const watched = new WeakSet();
+  const watchPage = tab => {
+    if (watched.has(tab)) return;
+    watched.add(tab);
+    tab.once("close", () => {
+      if (!context.pages().some(p => !p.isClosed())) stop();
+    });
+  };
+  for (const tab of context.pages()) watchPage(tab);
+  context.on("page", watchPage);
+}
+
 // 仅显式的人工登录入口可以开窗。播放器读取仍正常运行，但不会发出声音。
 export function browserLaunchOptions({ login = false, cdp = false } = {}) {
   return {

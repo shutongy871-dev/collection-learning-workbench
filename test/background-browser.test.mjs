@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { EventEmitter } from "node:events";
 import {
   browserLaunchOptions, browserEndpoint, connectBrowser, reuseBackgroundBrowser,
-  localEndpoint, removeOwnConnection
+  localEndpoint, removeOwnConnection, stopLoginWhenPagesClose
 } from "../scripts/browser-session.mjs";
 
 function fakeBrowser(args, error) {
@@ -96,4 +97,25 @@ test("退出仅删除本轮连接记录，保留后来启动的实例记录", as
   await removeOwnConnection(dir, "new");
   await assert.rejects(readFile(join(dir, "connection.json")), { code: "ENOENT" });
   await removeOwnConnection(dir, "new");
+});
+test("last login page closing stops profile, while remaining and newly opened tabs keep it alive", () => {
+  const context = new EventEmitter(), tabs = [];
+  let stops = 0;
+  context.pages = () => tabs;
+  const createTab = () => {
+    const tab = new EventEmitter();
+    tab.closed = false;
+    tab.isClosed = () => tab.closed;
+    tab.close = () => { tab.closed = true; tab.emit("close"); };
+    tabs.push(tab);
+    context.emit("page", tab);
+    return tab;
+  };
+  const first = createTab();
+  stopLoginWhenPagesClose(context, () => { stops++; });
+  const second = createTab();
+  first.close();
+  assert.equal(stops, 0);
+  second.close();
+  assert.equal(stops, 1);
 });

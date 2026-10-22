@@ -76,7 +76,7 @@ function chart(items, compact = false) {
   const latest = series.at(-1);
   return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="group" aria-label="${mode==="total"?"累计入库趋势":"历史导入与首次发现新增趋势"}">${lines}${path}${marks}${ticks}</svg>
     <div class="chart-legend"><span><i></i>${mode==="total"?"累计入库":"首次发现新增"}</span>${mode==="added"?'<span><i class="base"></i>历史导入</span>':""}<span>按北京时间统计</span></div>
-    <div class="chart-readout" aria-live="polite">${latest.date} · 累计 ${number(latest.total)} 条 · 历史导入 ${number(latest.baseline)} 条 · 首次发现新增 ${number(latest.added)} 条</div>`;
+    <div class="chart-readout" aria-live="polite">累计入库 ${number(latest.total)} 条 · 今日新入库 ${number(latest.added)} 条</div>`;
 }
 function heroArt() {
   return `<div class="hero-art" aria-hidden="true"><svg viewBox="0 0 200 180" fill="none"><ellipse cx="105" cy="93" rx="80" ry="61" stroke="#c9bdd7" stroke-dasharray="4 5"/><path d="M52 60l47-10 49 14v76l-48-13-48 11V60Z" fill="#faf8fd" stroke="#b8a5cb" stroke-width="1.5"/><path d="M99 50v77M64 77l23-5m-23 17 23-5m-23 17 23-5m26-20 24 6m-24 6 24 6m-24 6 17 4" stroke="#c7b9d6" stroke-width="2"/><circle cx="157" cy="45" r="19" fill="#dfe8be"/><path d="m150 45 5 5 9-10" stroke="#8c9b65" stroke-width="2"/><path d="m38 124 4 10 11 4-11 4-4 11-4-11-11-4 11-4Z" fill="#b7a2cf"/><circle cx="60" cy="29" r="4" fill="#c4b3d5"/><circle cx="170" cy="130" r="4" fill="#c4b3d5"/></svg></div>`;
@@ -111,7 +111,7 @@ const contentStatuses = { completed: "处理完成", needs_review: "需要核对
   needs_configuration: "等待处理服务配置", budget_exceeded: "已达到处理预算", needs_reconciliation: "等待核对调用结果",
   blocked: "处理暂停", running: "正在处理", partial: "部分完成", skipped: "已跳过", interrupted: "中断，等待手动恢复" };
 const contentErrors = { media_required: "还没有取得这条视频的媒体文件。", vision_not_configured: "视觉模型尚未配置。",
-  visible_browser_in_use: "专用登录窗口正在使用。方便时退出该窗口，再恢复任务。",
+  visible_browser_in_use: "抖音登录程序还未退出，同步未开始。请在右上角「我」点击「检查登录」，然后再次同步。",
   browser_busy: "另一项收藏任务正在运行，请稍后恢复。",
   browser_background_unverified: "无法确认浏览器能静默运行，已暂停，请检查运行日志。",
   browser_audio_not_muted: "旧浏览器尚未启用静音，退出专用浏览器后再恢复任务。",
@@ -242,13 +242,77 @@ function renderQuiz() {
     <p class="tiny-note">FSRS 按这道题的记忆记录计算间隔。${feedback.correct?"请按回忆的难易程度选择。":"答错会记为「还没记住」。"}</p>
     <div class="confidence">${Object.entries(feedback.previews).map(([rating,result])=>`<button data-rating="${rating}">${({again:"还没记住",hard:"吃力想起",good:"记住了",easy:"很轻松"})[rating]}<small>${delayLabel(result)}</small></button>`).join("")}</div>`}</div>`;
 }
+let preparationTimer, preparationWatch = 0, startingLearning = false, learnAfterConfiguration = false;
+const preparationMessages = {
+  daily_completed: "今天的学习目标已完成。",
+  empty_library: "学习库还没有收藏，请先点击「同步并分类」。",
+  no_due_questions: "现有题目还未到复习时间，到期后可继续学习。",
+  no_learning_content: "目前没有可出题的学习内容，试试同步新的知识类收藏。",
+  daily_budget_limit: "今日出题预算已用完，明天会继续准备。",
+  daily_item_limit: "今日处理数量已达上限，明天会继续准备。",
+  question_not_configured: "请先配置自己的模型，保存后会自动准备题目。",
+  asr_dependency_missing: "视频语音转写尚未安装，请按使用说明完成语音环境安装。",
+  call_outcome_unknown: "上次模型调用结果尚未核对，出题已暂停。",
+  explicit_retry_required: "上次出题中断，请重新点击「开始学习」恢复。"
+};
+function stopPreparationWatch() {
+  clearTimeout(preparationTimer);
+  preparationWatch++;
+}
+$("#preparing-close").addEventListener("click", () => $("#preparing-dialog").close());
+$("#preparing-dialog").addEventListener("close", stopPreparationWatch);
+async function showPreparation(result, watch) {
+  if (watch !== preparationWatch) return;
+  if (result.status === "ready") {
+    stopPreparationWatch();
+    $("#preparing-dialog").close();
+    await reload();
+    const due = todayItems();
+    if (due.length) startQuiz(due[0].key);
+    return;
+  }
+  if (result.status === "needs_configuration") {
+    $("#preparing-dialog").close();
+    learnAfterConfiguration = true;
+    await openModelConfiguration();
+    $("#model-status").textContent = preparationMessages[result.error] || questionErrors[result.error] ||
+      "模型配置尚未完成，保存后会继续准备题目。";
+    return;
+  }
+  if (result.status !== "preparing") {
+    stopPreparationWatch();
+    $("#preparing-title").textContent = "题目暂未准备好";
+    $("#preparing-status").textContent = preparationMessages[result.error] || preparationMessages[result.status] ||
+      questionErrors[result.error] || contentErrors[result.error] || "出题未完成，请稍后重新点击「开始学习」。";
+    $("#preparing-note").textContent = "";
+    return;
+  }
+  $("#preparing-title").textContent = "正在准备题目";
+  $("#preparing-status").textContent = result.stage === "syncing" ? "正在同步分类，完成后会自动准备题目。" :
+    `正在读取视频内容并出题 · 今日已准备 ${result.preparedVideos ?? 0} 条`;
+  $("#preparing-note").textContent = "准备好后会自动开始学习。关闭窗口后，后台任务会继续。";
+  preparationTimer = setTimeout(async () => {
+    try { await showPreparation(await api("learning/preparation"), watch); }
+    catch {
+      if (watch !== preparationWatch) return;
+      stopPreparationWatch();
+      $("#preparing-title").textContent = "暂时无法读取出题进度";
+      $("#preparing-status").textContent = "请确认本地服务正在运行，再重新点击「开始学习」。";
+      $("#preparing-note").textContent = "";
+    }
+  }, 1500);
+}
 async function startToday() {
-  const due=todayItems();
-  if(due.length){startQuiz(due[0].key);return;}
-  state=await api("state");
-  const refreshed=todayItems();
-  if(refreshed.length){render();startQuiz(refreshed[0].key);return;}
-  toast("今天的题目正在后台生成，完成后会自动出现在这里");
+  if (startingLearning) return;
+  startingLearning = true;
+  stopPreparationWatch();
+  const watch = preparationWatch;
+  try {
+    const result = await api("learning/start", {});
+    if (!["ready", "needs_configuration"].includes(result.status) && !$("#preparing-dialog").open)
+      $("#preparing-dialog").showModal();
+    await showPreparation(result, watch);
+  } finally { startingLearning = false; }
 }
 
 document.addEventListener("click",async e=>{
@@ -337,10 +401,13 @@ document.addEventListener("submit",async e=>{
 });
 let syncTimer, syncObservedActive = false;
 function syncError(code = "") {
+  if (/account_check_busy/.test(code)) return "正在检查抖音登录，请稍等几秒后再同步。";
+  if (/logged_in_account_required|account_not_logged_in|self_page_ready_timeout|login_browser_required/.test(code))
+    return "暂时无法确认抖音登录。请在右上角「我」重新登录，再点击同步。";
   if (/another_run|collection_busy|ELOCKED/.test(code)) return "其他收藏任务正在运行，请稍后重试。";
   if (/account_not_bound/.test(code)) return "请先完成本机账号绑定，再同步分类。";
   if (/account_changed|account_mismatch/.test(code)) return "账号与已绑定账号不一致，请先核对账号。";
-  if (/visible_browser/.test(code)) return "专用登录窗口正在使用，请退出该窗口后重试。";
+  if (/visible_browser/.test(code)) return contentErrors.visible_browser_in_use;
   return contentErrors[code] || "同步分类已暂停，请查看本机任务日志；如需登录或验证，完成后可再次点击。";
 }
 function renderSync(job) {
@@ -372,7 +439,7 @@ $("#refresh").addEventListener("click",async()=>{
     const job = await api("collection-sync", {});
     renderSync(job);syncObservedActive = job.status === "running" || job.active === true;
     void loadSync();
-  } catch(err) { $("#refresh").disabled=false;toast(err.message); }
+  } catch(err) { $("#refresh").disabled=false;toast(syncError(err.message)); }
 });
 void loadSync();
 function renderAccount(account) {
@@ -410,21 +477,25 @@ function fillModelFields(settings) {
   form.elements.apiKey.placeholder = settings.credentialPresent ? "已保存，留空保留原密钥" : "填写自己的 API Key";
   $("#model-status").textContent = settings.credentialPresent ? "本机已保存密钥；保存配置可恢复出题。" : "尚未配置自己的模型。";
 }
-modelButton.addEventListener("click", async () => {
+async function openModelConfiguration() {
   try {
     modelConfiguration = await api("model-settings");
     fillModelFields(modelConfiguration);
     $("#model-error").textContent = "";
     $(".account-menu").open = false;
-    $("#model-dialog").showModal();
+    if (!$("#model-dialog").open) $("#model-dialog").showModal();
   } catch { toast("暂时无法读取模型配置，请稍后重试。"); }
-});
+}
+modelButton.addEventListener("click", () => { learnAfterConfiguration = false; void openModelConfiguration(); });
 function closeModelDialog() {
   $("#model-form").elements.apiKey.value = "";
   $("#model-dialog").close();
 }
 $("#model-close").addEventListener("click", closeModelDialog);
-$("#model-dialog").addEventListener("close", () => { $("#model-form").elements.apiKey.value = ""; });
+$("#model-dialog").addEventListener("close", () => {
+  $("#model-form").elements.apiKey.value = "";
+  learnAfterConfiguration = false;
+});
 $("#model-form").elements.provider.addEventListener("change", event => {
   const provider = event.target.value, preset = modelConfiguration.presets[provider];
   fillModelFields(provider === modelConfiguration.provider ? modelConfiguration :
@@ -442,9 +513,11 @@ $("#model-form").addEventListener("submit", async event => {
       model: form.elements.model.value.trim(), apiKey: form.elements.apiKey.value.trim(),
       inputPrice: Number(form.elements.inputPrice.value), outputPrice: Number(form.elements.outputPrice.value),
       contentBudget: Number(form.elements.contentBudget.value) });
+    const continueLearning = learnAfterConfiguration;
     closeModelDialog();
     toast("模型配置已保存，正在后台准备题目。");
     void loadBatch();
+    if (continueLearning) await startToday();
   } catch (e) { $("#model-error").textContent = e.message; }
   finally { submit.disabled = false; }
 });

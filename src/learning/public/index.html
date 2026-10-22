@@ -16,6 +16,13 @@
   </div>
   <dialog id="detail" class="detail-dialog" aria-labelledby="detail-title"></dialog>
   <dialog id="quiz" class="quiz-dialog" aria-labelledby="quiz-title"></dialog>
+  <dialog id="preparing-dialog" aria-labelledby="preparing-title">
+    <div class="dialog-inner">
+      <div class="panel-title"><h2 id="preparing-title">正在准备题目</h2><button type="button" id="preparing-close" class="quiet">关闭</button></div>
+      <p id="preparing-status" role="status" aria-live="polite"></p>
+      <p id="preparing-note" class="tiny-note">准备好后会自动开始学习。关闭窗口后，后台任务会继续。</p>
+    </div>
+  </dialog>
   <dialog id="model-dialog" aria-labelledby="model-title">
     <form id="model-form" class="dialog-inner model-form">
       <div class="panel-title"><h2 id="model-title">模型配置</h2><button type="button" id="model-close" class="quiet" aria-label="关闭模型配置">关闭</button></div>

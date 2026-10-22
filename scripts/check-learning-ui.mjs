@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { importCollections } from "../src/learning/import.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
 import { dayKey } from "../src/learning/domain.mjs";
+import { learningStore } from "../src/learning/store.mjs";
 import { processContent, atomicJSON, digest } from "../src/understanding/pipeline.mjs";
 import { contentConfig, questionConfig } from "../src/understanding/config.mjs";
 import { execute } from "../src/understanding/media.mjs";
@@ -47,12 +48,14 @@ await processContent({ dataDir, item: fixtureItem, config: contentConfig({}),
   override: { route: "entertainment", reason: "仅用于隔离浏览器验收" },
   comments: [{ id: "ui-comment-only", text: "<script>bad()</script> 这是观众观点",
     sourceUrl: fixtureItem.url, collectedAt: new Date().toISOString() }] });
-let questionRequests = 0;
+let questionRequests = 0, finishQuestionPreparation;
+const questionGate = new Promise(resolve => { finishQuestionPreparation = resolve; });
 const mockProvider = createServer(async (req, res) => {
   let body = "";
   for await(const chunk of req) body += chunk;
   const request = JSON.parse(body), source = JSON.parse(request.messages[1].content)[0];
   questionRequests++;
+  await questionGate;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 200 }, choices: [{
     finish_reason: "stop", message: { content: JSON.stringify({ questions: [
@@ -86,6 +89,7 @@ await atomicJSON(join(dataDir, "content-batch", "ledger.json"), {
 let syncCalls = 0, finishSync;
 const server = await startLearningServer({ dataDir, port: 0, importOnStart: false, getModelConfig: () => modelConfig,
   modelEnvironment: {},
+  batchAdapters: { captureContent: async () => { throw new Error("ui_unexpected_media_acquisition"); } },
   accountAdapters: {
     launchLogin: () => ({ exitCode: 0, signalCode: null, once() {} }),
     readAccount: async () => ({ id: "synthetic-ui-account", nickname: "测试使用者" })
@@ -148,6 +152,7 @@ try {
     const current = await (await fetch(`${origin}/api/state`)).json();
     assert.ok(current.today.itemKeys.includes(item.key), JSON.stringify(current.today));
     await page.getByRole("button", { name: "开始学习", exact: false }).click();
+    await page.locator("#quiz[open]").waitFor();
     assert.equal(await page.locator("#quiz").evaluate(dialog => dialog.open), true,
       JSON.stringify({ errors, toast: await page.locator("#toast").textContent() }));
     assert.equal(await page.getByText(item.title, { exact: true }).count(), 0);
@@ -168,6 +173,30 @@ try {
     assert.equal(saved.events.length, 1);
     assert.ok(Date.parse(saved.progress[item.key].dueAt) > Date.now() + 23 * 3_600_000);
   });
+  await check("无密钥点击学习直接打开配置，不虚报正在生成", async () => {
+    const key = modelConfig.question.apiKey;
+    modelConfig.question.apiKey = "";
+    await page.getByRole("button", { name: "开始学习", exact: false }).click();
+    await page.locator("#model-dialog[open]").waitFor();
+    assert.match(await page.locator("#model-status").textContent(), /请先配置自己的模型/);
+    assert.equal(questionRequests, 0);
+    assert.equal(await page.locator("#preparing-dialog[open]").count(), 0);
+    await page.getByRole("button", { name: "关闭模型配置", exact: true }).click();
+    modelConfig.question.apiKey = key;
+  });
+  await check("点击学习实际启动出题、显示进度、准备后自动打开答题", async () => {
+    await learningStore(dataDir).mutate(s => { s.learningConfig.dailyVideos = 2; });
+    await fetch(`${origin}/api/batch/config`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxItemsPerDay: 2 }) });
+    await page.getByRole("button", { name: "开始学习", exact: false }).click();
+    await page.locator("#preparing-dialog[open]").waitFor();
+    assert.match(await page.locator("#preparing-status").textContent(), /正在读取视频内容并出题/);
+    finishQuestionPreparation();
+    await page.locator("#quiz[open]").waitFor();
+    assert.equal(await page.locator("#preparing-dialog[open]").count(), 0);
+    assert.equal(questionRequests, 1);
+    await page.getByRole("button", { name: "关闭答题", exact: true }).click();
+  });
   await check("每日视频数→自动出题发布→直接学习→FSRS→重载", async () => {
     await page.getByLabel("每天学习视频数", { exact: true }).fill("2");
     await page.locator("#learning-form").getByRole("button", { name: "保存", exact: true }).click();
@@ -177,12 +206,12 @@ try {
     do {
       batch = await (await fetch(`${origin}/api/batch`)).json();
       if (!batch.active && batch.latest?.status !== "running" &&
-          batch.latest?.results?.some(result => result.itemKey === automaticItem.key)) break;
+          batch.ledger.items[automaticItem.key]?.status === "completed") break;
       await new Promise(resolve => setTimeout(resolve, 50));
     } while (Date.now() < deadline);
     let saved = JSON.parse(await readFile(join(dataDir, "learning/state.json"), "utf8"));
     assert.ok(!batch.active && batch.latest?.status !== "running" &&
-      batch.latest?.results?.some(result => result.itemKey === automaticItem.key), JSON.stringify(batch.latest));
+      batch.ledger.items[automaticItem.key]?.status === "completed", JSON.stringify(batch.latest));
     assert.equal(questionRequests, 1, JSON.stringify(batch.latest));
     assert.equal(saved.learningConfig.dailyVideos, 2);
     assert.equal(saved.questions.filter(q => q.itemKey === automaticItem.key).length, 2);
@@ -251,11 +280,12 @@ try {
     }
   });
   assert.deepEqual(errors, []);
-  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 8, items: state.items.length,
+  await writeFile(join(output, "result.json"), JSON.stringify({ checkedAt: new Date().toISOString(), checks: 10, items: state.items.length,
     productionQuestions: productionQuestionCount, fixtureQuestions: 1, generatedQuestions: 2, questionRequests,
     consoleErrors: errors, isolatedData: true }, null, 2));
   console.log("全部浏览器验收通过；正式学习记录未被修改。");
 } finally {
+  finishQuestionPreparation();
   await context.close();
   await browser.close();
   await new Promise(resolve => server.close(resolve));

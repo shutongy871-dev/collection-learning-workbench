@@ -218,7 +218,7 @@ async function main() {
     run.status = "blocked";
     run.error = e.message;
     run.action = e.code === "visible_browser_in_use" ?
-      "人工登录窗口正在使用，后台任务已暂停。方便时退出该专用浏览器，再运行 npm run daily。" :
+      "抖音登录程序还未退出，同步未开始。请在学习网页右上角「我」点击「检查登录」，然后再次同步。" :
       "后台任务已停止，没有弹出网页。查看本次日志；如需登录或验证，方便时运行 npm run browser，完成后退出专用浏览器，再运行 npm run daily。";
     process.exitCode = 1;
     return { platformBusy: true }; // 登录/平台异常时本次也不继续发起内容采集。

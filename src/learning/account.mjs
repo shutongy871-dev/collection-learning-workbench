@@ -22,6 +22,12 @@ export async function readCurrentAccount(dataDir) {
 }
 
 export function accountManager({ dataDir, store, readAccount = () => readCurrentAccount(dataDir),
+  loginHasPages = async () => {
+    const endpoint = await browserEndpoint(join(dataDir, "local-browser"), {});
+    const browser = await connectBrowser(endpoint, { background: false });
+    try { return browser.contexts().some(c => c.pages().some(p => !p.isClosed())); }
+    finally { await browser.close(); }
+  },
   launchLogin = () => spawn(process.execPath, [resolve(root, "scripts/local-browser.mjs"), "--login"], {
     cwd: root, env: { ...runtimeEnvironment(), COLLECTION_BROWSER_DIR: resolve(dataDir, "local-browser") },
     stdio: ["ignore", "ignore", "ignore", "ipc"]
@@ -81,5 +87,21 @@ export function accountManager({ dataDir, store, readAccount = () => readCurrent
       throw e;
     } finally { operation = false; }
   }
-  return { status, login, check, close: () => closeBrowserChild(child) };
+  async function prepareForSync() {
+    if (operation) throw new Error("account_check_busy");
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    // Only stop the login child owned by this server. Never close daily Chrome.
+    operation = true;
+    let hasPages;
+    try {
+      try { hasPages = await loginHasPages(); }
+      catch (e) {
+        if (!["ENOENT", "browser_unavailable"].includes(e.code)) throw e;
+        hasPages = false;
+      }
+      if (!hasPages) { await closeBrowserChild(child); child = undefined; }
+    } finally { operation = false; }
+    if (hasPages) await check(); // Live identity proof before ending an active login session.
+  }
+  return { status, login, check, prepareForSync, close: () => closeBrowserChild(child) };
 }

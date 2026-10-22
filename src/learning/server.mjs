@@ -9,7 +9,8 @@ import { routeContent } from "../understanding/route.mjs";
 import { latestContent, publicContent } from "../understanding/pipeline.mjs";
 import { learningStore } from "./store.mjs";
 import { previewReview, summarizeProgress } from "./scheduler.mjs";
-import { decideDraft, generateQuestions, generationSummary } from "./generator.mjs";
+import { decideDraft, generateQuestions, generationSummary, questionReservation } from "./generator.mjs";
+import { learningPreparation } from "./preparation.mjs";
 import { batchStatus, configureBatch, planBatch, runContentBatch } from "./batch.mjs";
 import { collectionSync } from "./collection-sync.mjs";
 import { accountManager } from "./account.mjs";
@@ -30,24 +31,49 @@ async function body(req) {
   try { return JSON.parse(data || "{}"); } catch { throw error("请求不是有效 JSON"); }
 }
 export async function startLearningServer({ dataDir = join(here, "../../.data"), port = 7790, importOnStart = true,
-  autoPrepare = false, classificationRunner, accountAdapters = {}, modelEnvironment,
+  autoPrepare = false, classificationRunner, accountAdapters = {}, modelEnvironment, batchAdapters = {},
   getModelConfig = () => configuredModels(dataDir, modelEnvironment) } = {}) {
   const store = learningStore(dataDir), mutate = store.mutate;
   const sync = collectionSync({ dataDir, store, runner: classificationRunner,
-    onComplete: () => { if (autoPrepare) startBatch(); } });
+    onComplete: () => {
+      if (autoPrepare) {
+        if (!startBatch(true)) retryAfterBatch = true;
+      }
+    } });
   const account = accountManager({ dataDir, store, ...accountAdapters });
   const settings = modelSettings(dataDir, modelEnvironment);
-  let batchTask = null, retryAfterBatch = false;
+  let batchTask = null, retryAfterBatch = false, taskError;
   await store.initialize(importOnStart);
   const startBatch = (retry = false) => {
     if (batchTask) return false;
-    batchTask = runContentBatch({ dataDir, retry, getModelConfig })
-      .catch(e => { console.error("content_batch_failed", e.code || "batch_failed"); })
+    taskError = undefined;
+    batchTask = (async () => {
+      questionReservation(getModelConfig().question);
+      await account.prepareForSync();
+      const result = await runContentBatch({ dataDir, retry, getModelConfig, adapters: batchAdapters });
+      if (result.reason === "batch_locked") taskError = "browser_busy";
+    })()
+      .catch(e => {
+        taskError = e.code || (/^[a-z_]+$/.test(e.message) ? e.message : "batch_failed");
+        console.error("content_batch_failed", taskError);
+      })
       .finally(() => {
         batchTask = null;
         if (retryAfterBatch) { retryAfterBatch = false; startBatch(true); }
       });
     return true;
+  };
+  const preparation = async () => {
+    let modelError;
+    try { questionReservation(getModelConfig().question); }
+    catch (e) { modelError = e.code || "invalid_model_config"; }
+    const current = await store.read(), batch = await batchStatus(dataDir);
+    const plan = await planBatch(dataDir, { retry: true });
+    const result = learningPreparation(current, batch, { active: Boolean(batchTask), modelError, taskError, plan });
+    const job = await sync.status();
+    if (["idle", "blocked"].includes(result.status) && (job.status === "running" || job.active))
+      return { status: "preparing", stage: "syncing", preparedVideos: 0 };
+    return result;
   };
   const publicState = state => {
     const dailyItems = dailyLearningQueue(state.items, state.progress, state.questions, state.cards, state.events,
@@ -86,6 +112,7 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
       if (req.method === "GET" && url.pathname === "/api/collection-sync") return json(res, 200, await sync.status());
       if (req.method === "GET" && url.pathname === "/api/account") return json(res, 200, await account.status());
       if (req.method === "GET" && url.pathname === "/api/model-settings") return json(res, 200, settings.status());
+      if (req.method === "GET" && url.pathname === "/api/learning/preparation") return json(res, 200, await preparation());
       if (req.method === "GET" && url.pathname === "/api/batch") return json(res, 200, {
         ...await batchStatus(dataDir), plan: await planBatch(dataDir), active: Boolean(batchTask) });
       if (req.method === "GET" && url.pathname === "/api/drafts") {
@@ -108,6 +135,16 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
       }
       if (req.method === "POST" && url.pathname.startsWith("/api/")) {
         const b = await body(req);
+        if (url.pathname === "/api/learning/start") {
+          const result = await preparation();
+          const recoverable = new Set(["browser_busy", "visible_browser_in_use", "media_required", "explicit_retry_required"]);
+          if (result.status === "idle" || (result.status === "blocked" && recoverable.has(result.error))) {
+            await configureBatch(dataDir, { enabled: true, maxItemsPerDay: state.learningConfig.dailyVideos });
+            startBatch(true);
+            return json(res, 202, { status: "preparing", preparedVideos: 0, stage: "starting" });
+          }
+          return json(res, 200, result);
+        }
         if (url.pathname === "/api/model-settings") {
           const saved = await settings.save(b);
           const current = await store.read();
@@ -117,7 +154,10 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
         }
         if (url.pathname === "/api/account/login") return json(res, 202, await account.login());
         if (url.pathname === "/api/account/check") return json(res, 200, await account.check());
-        if (url.pathname === "/api/collection-sync") return json(res, 202, await sync.start());
+        if (url.pathname === "/api/collection-sync") {
+          await account.prepareForSync();
+          return json(res, 202, await sync.start());
+        }
         if (url.pathname === "/api/batch/config") return json(res, 200, await configureBatch(dataDir, b));
         if (url.pathname === "/api/learning/config") {
           if (Object.keys(b).some(key => key !== "dailyVideos") || !Number.isInteger(b.dailyVideos) ||
@@ -236,7 +276,9 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
     await configureBatch(dataDir, { enabled: true, maxItemsPerDay: state.learningConfig.dailyVideos });
     startBatch(true);
     // Revisit the daily queue as new snapshots arrive and the learning day changes.
-    preparationTimer = setInterval(() => startBatch(), 60_000);
+    preparationTimer = setInterval(() => {
+      void sync.status().then(job => { if (job.status !== "running" && !job.active) startBatch(); });
+    }, 60_000);
     preparationTimer.unref();
   }
   return server;

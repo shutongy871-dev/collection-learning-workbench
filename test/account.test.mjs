@@ -64,6 +64,38 @@ test("concurrent login calls launch at most one process", async t => {
   assert.equal(launches, 1);
   await manager.close();
 });
+test("sync releases an owned login browser with no pages without another platform read", async t => {
+  const f = await fixture(t), child = fakeChild();
+  let reads = 0;
+  const manager = accountManager({ ...f, launchLogin: () => child, loginHasPages: async () => false,
+    readAccount: async () => { reads++; throw new Error("must_not_read"); } });
+  await manager.login();
+  await manager.prepareForSync();
+  assert.equal(child.exitCode, 0);
+  assert.equal(reads, 0);
+  await manager.prepareForSync();
+});
+test("sync checks current account before closing owned login pages; failed login remains available", async t => {
+  const f = await fixture(t), child = fakeChild();
+  let loggedIn = false;
+  const manager = accountManager({ ...f, launchLogin: () => child, loginHasPages: async () => true,
+    readAccount: async () => {
+      if (!loggedIn) throw new Error("logged_in_account_required");
+      return { id: "synthetic-sync", nickname: "测试账号" };
+    } });
+  await manager.login();
+  await assert.rejects(manager.prepareForSync(), /logged_in_account_required/);
+  assert.equal(child.exitCode, null);
+  loggedIn = true;
+  await manager.prepareForSync();
+  assert.equal(child.exitCode, 0);
+  assert.equal((await manager.status()).status, "verified");
+});
+test("sync does not inspect or close a browser not owned by the account manager", async t => {
+  const f = await fixture(t);
+  const manager = accountManager({ ...f, loginHasPages: () => assert.fail("must not inspect unowned browser") });
+  await manager.prepareForSync();
+});
 test("fresh HTTP server returns no collections and account endpoint handles login/check", async t => {
   const f = await fixture(t);
   const server = await startLearningServer({ dataDir: f.dataDir, port: 0, importOnStart: false,
