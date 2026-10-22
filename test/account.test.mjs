@@ -8,6 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { accountManager } from "../src/learning/account.mjs";
 import { learningStore } from "../src/learning/store.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
+import { recordAccountLogin, recordAccountFailure } from "../scripts/account-status.mjs";
+import { putJson } from "../scripts/daily.mjs";
 
 async function fixture(t) {
   const dataDir = await mkdtemp(join(tmpdir(), "account-test-"));
@@ -30,6 +32,52 @@ async function waitForLogin(manager, expected) {
   }
   assert.fail(`login did not reach ${expected}`);
 }
+test("background platform reads update the same account status without launching a login window", async t => {
+  const f = await fixture(t);
+  const manager = accountManager({ ...f, readAccount: async () => ({ id: "synthetic-background", nickname: "后台账号" }),
+    launchLogin: () => assert.fail("must not open login window") });
+  await manager.check(); // Sets up the bound account.
+  await putJson(join(f.dataDir, "account-status.json"), { status: "unverified" });
+  assert.equal((await manager.status()).status, "unverified");
+  await recordAccountLogin(f.dataDir, { id: "synthetic-background", nickname: "后台账号" }, "synthetic-background");
+  assert.equal((await manager.status()).status, "verified");
+  await recordAccountFailure(f.dataDir, new Error("media_download_failed"));
+  assert.equal((await manager.status()).status, "verified", "media failures are not login failures");
+  await recordAccountFailure(f.dataDir, new Error("account_not_logged_in"));
+  assert.equal((await manager.status()).status, "unverified");
+  await assert.rejects(recordAccountLogin(f.dataDir, { id: "synthetic-other" }, "synthetic-background"), /account_changed/);
+  assert.equal((await manager.status()).status, "unverified");
+});
+test("startup discovery makes one background read, respects the library account and never opens login UI", async t => {
+  const f = await fixture(t);
+  let reads = 0;
+  const manager = accountManager({ ...f, readAccount: async options => {
+    if (options?.background) reads++;
+    return { id: "synthetic-discovery", nickname: "后台已登录" };
+  }, launchLogin: () => assert.fail("must not open login UI") });
+  await manager.check();
+  await putJson(join(f.dataDir, "account-status.json"), { status: "unverified" });
+  const discovered = await manager.discover();
+  assert.equal(discovered.status, "verified");
+  assert.equal(discovered.nickname, "后台已登录");
+  await manager.discover();
+  await manager.status();
+  assert.equal(reads, 1);
+});
+test("startup discovery skips unbound profiles and cannot substitute a different library account", async t => {
+  const f = await fixture(t);
+  let reads = 0;
+  const manager = accountManager({ ...f, readAccount: async () => {
+    reads++;
+    return { id: "synthetic-original" };
+  } });
+  await manager.discover();
+  assert.equal(reads, 0);
+  await manager.check();
+  await f.store.mutate(s => { s.sources = [{ platform: "douyin", accountId: "synthetic-other" }]; });
+  assert.equal((await manager.discover()).status, "unverified");
+  assert.equal(reads, 2);
+});
 test("login-ready signal automatically binds a fresh read and closes only the owned browser", async t => {
   const f = await fixture(t), child = fakeChild();
   let reads = 0, finishRead;

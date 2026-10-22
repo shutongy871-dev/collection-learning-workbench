@@ -448,6 +448,7 @@ function renderAccount(account) {
   const verified = account.status === "verified", pending = account.status === "login_pending";
   $("#account-state").textContent = verified ?
     `${account.nickname || "抖音账号"} · 已连接（${dateText(account.checkedAt)}）` :
+    account.status === "checking" ? "正在后台确认抖音登录，无需打开窗口。" :
     account.status === "login_pending" ? "请在专用窗口扫码，登录成功后会自动收起窗口。" :
     account.status === "login_error" ? account.error === "account_changed" ?
       "扫码账号与学习库不一致，请在登录窗口切换为原账号。" :
@@ -458,15 +459,18 @@ function renderAccount(account) {
   $("#account-state").hidden = verified || account.status === "unverified";
   const loginButton = $("#account-login");
   loginButton.textContent = verified ? "抖音已登录（支持数据同步）" :
+    account.status === "checking" ? "正在确认抖音登录…" :
     pending ? "正在登录抖音（请在窗口扫码）" :
     account.status === "unavailable" ? "登录抖音（状态暂不可用）" :
     account.status === "login_error" ? "重试连接（暂时无法同步）" : "登录抖音（未登录无法同步）";
   loginButton.dataset.status = account.status;
-  loginButton.disabled = accountBusy || pending;
+  loginButton.disabled = accountBusy || pending || account.status === "checking";
   loginButton.title = `${$("#account-state").textContent}${verified ? "；点击可重新登录。" : ""}`;
   clearTimeout(accountTimer);
   accountTimer = undefined;
-  if (account.status === "login_pending" || account.status === "login_error") {
+  if (account.status === "checking") {
+    accountTimer = setTimeout(() => void loadAccount(), 2000);
+  } else if (account.status === "login_pending" || account.status === "login_error") {
     loginObservedPending = true;
     accountTimer = setTimeout(() => void loadAccount(), 2000);
   } else if (loginObservedPending && account.status === "unavailable") {
@@ -491,7 +495,7 @@ async function accountAction(path) {
   finally {
     accountBusy = false;
     const status = $("#account-login").dataset.status;
-    $("#account-login").disabled = status === "login_pending";
+    $("#account-login").disabled = status === "login_pending" || status === "checking";
   }
 }
 $("#account-login").addEventListener("click", () => void accountAction("account/login"));

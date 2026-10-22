@@ -2,6 +2,7 @@ import { readFile, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserEndpoint, connectBrowser } from "./browser-session.mjs";
+import { recordAccountLogin, recordAccountFailure } from "./account-status.mjs";
 
 export const browserDir = fileURLToPath(new URL("../.data/local-browser/", import.meta.url));
 // 每日运行独立存证，连接和登录目录固定；保留原始人工验收证据。
@@ -425,6 +426,8 @@ async function main() {
   let capture, account;
   try {
     ({ capture, account } = await openSelfPage(page, { expectedAccountId: process.env.COLLECTION_ACCOUNT_ID }));
+    if (process.env.COLLECTION_DATA_DIR)
+      await recordAccountLogin(process.env.COLLECTION_DATA_DIR, account, process.env.COLLECTION_ACCOUNT_ID);
     await page.getByRole("tab", { name: "收藏夹", exact: true }).waitFor();
     await capture.flush();
     const pages = await finishPages(page, capture, "/collects/list/",
@@ -463,6 +466,7 @@ async function main() {
       unclassified: unclassified.length, pages: favoritePages.length }));
   } catch (error) {
     capture ??= error.capture;
+    if (process.env.COLLECTION_DATA_DIR) await recordAccountFailure(process.env.COLLECTION_DATA_DIR, error);
     throw error;
   } finally {
     await capture?.flush();

@@ -31,7 +31,7 @@ async function body(req) {
   try { return JSON.parse(data || "{}"); } catch { throw error("请求不是有效 JSON"); }
 }
 export async function startLearningServer({ dataDir = join(here, "../../.data"), port = 7790, importOnStart = true,
-  autoPrepare = false, classificationRunner, accountAdapters = {}, modelEnvironment, batchAdapters = {},
+  autoPrepare = false, autoDiscover = autoPrepare, classificationRunner, accountAdapters = {}, modelEnvironment, batchAdapters = {},
   getModelConfig = () => configuredModels(dataDir, modelEnvironment) } = {}) {
   const store = learningStore(dataDir), mutate = store.mutate;
   const sync = collectionSync({ dataDir, store, runner: classificationRunner,
@@ -271,6 +271,7 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
   let preparationTimer;
   server.once("close", () => { clearInterval(preparationTimer); void account.close(); });
+  if (autoDiscover) await account.discover();
   if (autoPrepare) {
     const state = await store.read();
     await configureBatch(dataDir, { enabled: true, maxItemsPerDay: state.learningConfig.dailyVideos });

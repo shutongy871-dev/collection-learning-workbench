@@ -11,6 +11,7 @@ import { contentConfig, loadContentEnv } from "../src/understanding/config.mjs";
 import { inspectMedia, execute, fail } from "../src/understanding/media.mjs";
 import { routeContent } from "../src/understanding/route.mjs";
 import { browserLaunchOptions, reuseBackgroundBrowser } from "./browser-session.mjs";
+import { recordAccountLogin, recordAccountFailure } from "./account-status.mjs";
 
 export function commentsFromResponse(data, sourceUrl, collectedAt = new Date().toISOString()) {
   if (data?.status_code !== 0 || !Array.isArray(data.comments)) return null;
@@ -61,6 +62,7 @@ export async function captureContent({ item, dataDir, config }) {
     page.setDefaultTimeout(30000);
     const self = await openSelfPage(page, { folders: false, expectedAccountId: item.accountId });
     self.capture.stop();
+    await recordAccountLogin(dataDir, self.account, item.accountId);
     const sourceUrl = `https://www.douyin.com/video/${encodeURIComponent(item.id)}`;
     const observedMedia = new Map();
     let capturedComments = null, finishComments;
@@ -127,6 +129,9 @@ export async function captureContent({ item, dataDir, config }) {
       mediaHash: asset.hash, durationMs: asset.durationMs, ...await settleComments(), acquisition: "visible_player" };
     await atomicJSON(join(directory, "input.json"), manifest);
     return { input: join(directory, "input.json"), durationMs: asset.durationMs, mediaBytes: asset.size };
+  } catch (error) {
+    await recordAccountFailure(dataDir, error);
+    throw error;
   } finally {
     if (ownContext) await context?.close().catch(() => {});
     else { await page?.close().catch(() => {}); await browser?.close().catch(() => {}); }

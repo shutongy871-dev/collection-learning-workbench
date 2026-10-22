@@ -13,6 +13,7 @@ import { learningStore } from "../src/learning/store.mjs";
 import { processContent, atomicJSON, digest } from "../src/understanding/pipeline.mjs";
 import { contentConfig, questionConfig } from "../src/understanding/config.mjs";
 import { execute } from "../src/understanding/media.mjs";
+import { recordAccountLogin } from "./account-status.mjs";
 
 const output = resolve(process.env.LEARNING_TEST_OUTPUT_DIR || ".data/learning-verification");
 await mkdir(output, { recursive: true });
@@ -117,7 +118,7 @@ const check = async (name, fn) => { await fn(); console.log(`✓ ${name}`); };
 try {
   await page.goto(origin);
   await page.getByRole("heading", { name: "让收藏，成为你的收获。" }).waitFor();
-  await check("顶部直接展示同步、登录和模型配置，扫码后自动切换已登录状态", async () => {
+  await check("顶部登录状态随扫码及后台账号读取自动更新，无需手动检查", async () => {
     await page.getByRole("button", { name: "登录抖音（未登录无法同步）", exact: true }).waitFor();
     assert.equal(await page.getByRole("button", { name: "检查登录", exact: true }).count(), 0);
     assert.equal(await page.locator(".account-menu, .account-panel").count(), 0);
@@ -139,6 +140,13 @@ try {
     await page.reload();
     await page.getByRole("button", { name: "抖音已登录（支持数据同步）", exact: true }).waitFor();
     assert.equal(await page.locator("#account-login").isEnabled(), true, "已登录时仍能主动重新登录");
+    await atomicJSON(join(dataDir, "account-status.json"), { status: "unverified" });
+    await page.reload();
+    await page.getByRole("button", { name: "登录抖音（未登录无法同步）", exact: true }).waitFor();
+    // Same publication path used by a current background scan/media read.
+    await recordAccountLogin(dataDir, { id: "synthetic-ui-account", nickname: "测试使用者" }, "synthetic-ui-account");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.getByRole("button", { name: "抖音已登录（支持数据同步）", exact: true }).waitFor();
   });
   await check("首页只保留刷题入口，不展示收藏标题或心得", async () => {
     assert.equal(await page.locator(".stat-value").first().textContent(), `${state.items.length.toLocaleString("zh-CN")}条`);
