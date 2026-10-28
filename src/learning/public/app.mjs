@@ -1,4 +1,4 @@
-import { dayKey, collectionGrowthSeries, collectionFolderCounts, learningStatus, dueQuestions, DAY } from "/domain.mjs";
+import { dayKey, collectionGrowthSeries, collectionFolderCounts, learningStatus, DAY } from "/domain.mjs";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -7,13 +7,17 @@ const sourceName = p => ({ douyin: "抖音" })[p] ?? "未知来源";
 const dateText = value => new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 const labels = { today: "今日学习" };
 let state, range = 30, chartMode = "total", trendFolder = "";
-let detailKey = null, quizItem = null, quizQuestion = null, choice = null, attemptId = null, feedback = null, quizFinished = false;
+let detailKey = null, quizItem = null, quizQuestion = null, choice = null, attemptId = null, feedback = null;
 let detailDirty = false, busy = false, toastTimer;
 const dirtyForms = new Set();
 const view = () => labels[location.hash.slice(1)] ? location.hash.slice(1) : "today";
 const byKey = key => state.items.find(i => i.key === key);
 const itemQuestions = key => state.questions.filter(q => q.itemKey === key);
 const todayItems = () => (state.today?.itemKeys ?? []).map(byKey).filter(Boolean);
+const todayQuestions = () => {
+  const questions = new Map(state.questions.map(q => [q.id, q]));
+  return (state.today?.questionIds ?? []).map(id => questions.get(id)).filter(Boolean);
+};
 
 async function api(path, data) {
   const res = await fetch(`/api/${path}`, data === undefined ? {} : {
@@ -176,7 +180,8 @@ const questionErrors = { question_not_configured: "请在本机模型配置中�
   question_pricing_missing: "请补全出题模型单价与调用预留额。", question_evidence_missing: "暂无足够证据。先处理视频或补充原文摘录。",
   draft_source_changed: "原文已变化，请根据最新原文重新生成草稿。",
   question_call_outcome_unknown: "上次调用结果未知，需先核对供应商记录。",
-  question_output_incomplete: "模型返回未完成，草稿未发布。", invalid_question_evidence: "模型引用未通过原文校验，草稿未发布。" };
+  question_output_incomplete: "模型返回未完成，草稿未发布。", invalid_question_evidence: "模型引用未通过原文校验，草稿未发布。",
+  low_value_question: "题目只复述商品细节，缺少学习价值，已拦截。" };
 async function loadDrafts(key) {
   const target=$("#draft-result");
   try {
@@ -250,18 +255,17 @@ function startQuiz(key) {
   if(!qs.length){toast("这条视频的题目尚未准备好");return;}
   if(!p||learningStatus(p)!=="due"){toast("这条视频还未到复习时间");return;}
   if($("#detail").open){if(!canCloseDetail())return;$("#detail").close();}
-  const due=dueQuestions([item],state.progress,qs,state.cards);
+  const due=todayQuestions().filter(q=>q.itemKey===key);
   if(!due.length){toast("这条收藏的题目尚未到期");return;}
-  quizItem=item;quizQuestion=due[0];choice=null;feedback=null;quizFinished=false;attemptId=crypto.randomUUID();
-  renderQuiz();$("#quiz").showModal();
+  quizItem=item;quizQuestion=due[0];choice=null;feedback=null;attemptId=crypto.randomUUID();
+  renderQuiz();
+  if(!$("#quiz").open)$("#quiz").showModal();
+  $("#quiz-title").setAttribute("tabindex","-1");
+  $("#quiz-title").focus();
+  $("#quiz").scrollTop=0;
 }
 function renderQuiz() {
   const q=quizQuestion,item=quizItem;
-  if(quizFinished){
-    const p={dueAt:state.cards[q.id].card.due};
-    $("#quiz").innerHTML=`<div class="dialog-inner"><div class="dialog-top"><span>ONE SMALL STEP FORWARD</span><button class="close" data-action="close-quiz" aria-label="关闭答题">×</button></div><div class="completion"><div class="big-check">✓</div><h2 id="quiz-title">本题完成。</h2><p>复习记录已保存 · 下次复习 ${dateText(p.dueAt)}</p><button type="button" class="primary" data-action="next-quiz">继续学习 →</button></div></div>`;
-    return;
-  }
   const p={reviews:state.cards[q.id].card.reps};
   const delayLabel=result=>{
     const minutes=Math.max(1,Math.round((Date.parse(result.card.due)-Date.parse(feedback.at))/60000));
@@ -374,7 +378,10 @@ document.addEventListener("click",async e=>{
     if(el.dataset.rating){
       el.disabled=true;
       await api("review",{itemKey:quizItem.key,attemptId:feedback.attemptId,rating:el.dataset.rating});
-      state=await api("state");quizFinished=true;renderQuiz();render();
+      state=await api("state");render();
+      const due=todayQuestions();
+      if(due.length)startQuiz(due[0].itemKey);
+      else{$("#quiz").close();toast("今日待刷已完成");}
     }
     switch(el.dataset.action){
       case "batch-refresh":await loadBatch();break;
@@ -391,10 +398,6 @@ document.addEventListener("click",async e=>{
       case "submit-answer":
         el.disabled=true;feedback=await api("answer",{itemKey:quizItem.key,questionId:quizQuestion.id,choice,attemptId});choice=feedback.choice;renderQuiz();
         $("#quiz .answer-panel").setAttribute("tabindex","-1");$("#quiz .answer-panel").focus();$("#quiz .answer-panel").scrollIntoView({block:"start"});break;
-      case "next-quiz":{
-        el.disabled=true;$("#quiz").close();const due=todayItems();
-        if(due.length)startQuiz(due[0].key);else toast("当前学习清单已完成，休息一下吧");break;
-      }
     }
   }catch(err){
     toast(err.message);

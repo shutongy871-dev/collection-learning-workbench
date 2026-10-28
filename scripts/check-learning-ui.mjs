@@ -234,11 +234,11 @@ try {
     assert.equal(await page.getByRole("link", { name: /原收藏/ }).count(), 0);
     assert.equal(await page.locator("[data-rating]").count(), 4);
     await page.getByRole("button", { name: "记住了 2 天后复习" }).click();
-    await page.getByRole("heading", { name: "本题完成。" }).waitFor();
+    await page.locator("#quiz").waitFor({ state: "hidden" });
     assert.equal(await page.locator("#quiz textarea").count(), 0);
     assert.equal(await page.getByText("心得", { exact: false }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: "继续学习", exact: false }).count(), 1);
-    await page.getByRole("button", { name: "关闭答题", exact: true }).click();
+    assert.equal(await page.getByRole("heading", { name: "本题完成。" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "继续学习", exact: false }).count(), 0);
     const saved = JSON.parse(await readFile(join(dataDir, "learning/state.json"), "utf8"));
     assert.equal(saved.events.length, 1);
     assert.ok(Date.parse(saved.progress[item.key].dueAt) > Date.now() + 23 * 3_600_000);
@@ -295,8 +295,13 @@ try {
     await page.getByRole("button", { name: "提交答案，查看解析" }).click();
     await page.locator(".answer-panel").waitFor();
     assert.equal(await page.locator(".answer-panel blockquote").textContent(), automaticEvidence);
+    const previousPrompt = await page.locator("#quiz-title").textContent();
     await page.locator("[data-rating='good']").click();
-    await page.getByRole("heading", { name: "本题完成。" }).waitFor();
+    await page.waitForFunction(prompt => document.querySelector("#quiz-title")?.textContent !== prompt,
+      previousPrompt);
+    assert.equal(await page.locator("#quiz").evaluate(dialog => dialog.open), true);
+    assert.equal(await page.locator("[data-rating]").count(), 0);
+    assert.equal(await page.getByRole("heading", { name: "本题完成。" }).count(), 0);
     await page.getByRole("button", { name: "关闭答题", exact: true }).click();
     await page.reload();
     saved = JSON.parse(await readFile(join(dataDir, "learning/state.json"), "utf8"));

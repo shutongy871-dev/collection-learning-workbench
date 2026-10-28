@@ -1,3 +1,5 @@
+import { dailyQuestionRank, lowValueQuestionReason } from "./question-policy.mjs";
+
 export const DAY = 86_400_000;
 export const dayKey = value => new Date(new Date(value).getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
 // SQL 等效：主题字典只匹配夹名正向部分；“非/不含/不包括/排除”后的词不参与。
@@ -118,7 +120,8 @@ export function todayQueue(items, progress, questions, now = Date.now()) {
 /** SQL equivalent:
  * WITH completed_today AS (SELECT DISTINCT item_key FROM events WHERE day(at)=:today),
  * due_items AS (SELECT item_key, MIN(due) FROM cards WHERE due<=:now GROUP BY item_key)
- * SELECT due_items in due order, while completed_today plus selected due item keys stays <= :dailyVideos.
+ * SELECT eligible due_items in seeded category-weighted order, while completed_today
+ * plus selected due item keys stays <= :dailyVideos. Filter product-detail recall questions.
  * The limit is per distinct video, not per question. Completed videos keep their slot for the whole day. */
 export function dailyLearningQueue(items, progress, questions, cards, events, dailyVideos, now = Date.now()) {
   const limit = Number.isInteger(dailyVideos) ? Math.max(1, dailyVideos) : 5;
@@ -126,12 +129,14 @@ export function dailyLearningQueue(items, progress, questions, cards, events, da
   const completed = new Set(events.filter(e => dayKey(e.at) === today).map(e => e.itemKey));
   const dueByItem = new Map();
   for (const q of questions) {
-    if (!progress[q.itemKey] || !cards[q.id] || Date.parse(cards[q.id].card.due) > +new Date(now)) continue;
+    if (lowValueQuestionReason(q) || !progress[q.itemKey] || !cards[q.id] ||
+      Date.parse(cards[q.id].card.due) > +new Date(now)) continue;
     const due = Date.parse(cards[q.id].card.due);
     if (!dueByItem.has(q.itemKey) || due < dueByItem.get(q.itemKey)) dueByItem.set(q.itemKey, due);
   }
+  const ranks = new Map(items.map(item => [item.key, dailyQuestionRank({ id: item.key }, item, today)]));
   const due = items.filter(item => dueByItem.has(item.key))
-    .sort((a, b) => dueByItem.get(a.key) - dueByItem.get(b.key) || a.key.localeCompare(b.key));
+    .sort((a, b) => ranks.get(a.key) - ranks.get(b.key) || a.key.localeCompare(b.key));
   const selected = new Set(completed);
   for (const item of due) {
     if (selected.has(item.key)) continue;
@@ -139,6 +144,29 @@ export function dailyLearningQueue(items, progress, questions, cards, events, da
     selected.add(item.key);
   }
   return due.filter(item => selected.has(item.key));
+}
+
+/** SQL equivalent: due questions in today's eligible videos ORDER BY seeded_rank(day,id).
+ * Greedily take a different item_key from the preceding question when available.
+ * Uses the existing published version's daily video limit; FSRS dates are unchanged. */
+export function dailyQuizQueue(items, progress, questions, cards, events, dailyVideos, now = Date.now()) {
+  const selected = dailyLearningQueue(items, progress, questions, cards, events, dailyVideos, now);
+  const byKey = new Map(selected.map(item => [item.key, item]));
+  const ranks = new Map(questions.filter(q => byKey.has(q.itemKey))
+    .map(q => [q.id, dailyQuestionRank(q, byKey.get(q.itemKey), dayKey(now))]));
+  const remaining = dueQuestions(selected, progress, questions, cards, now)
+    .filter(q => !lowValueQuestionReason(q))
+    .sort((a, b) => ranks.get(a.id) - ranks.get(b.id) || a.id.localeCompare(b.id));
+  let previousKey = events.filter(e => dayKey(e.at) === dayKey(now)).at(-1)?.itemKey;
+  const ordered = [];
+  while (remaining.length) {
+    let index = remaining.findIndex(q => q.itemKey !== previousKey);
+    if (index < 0) index = 0;
+    const [q] = remaining.splice(index, 1);
+    ordered.push(q);
+    previousKey = q.itemKey;
+  }
+  return ordered;
 }
 
 /** SQL: SELECT q.* FROM questions q JOIN cards c ON c.question_id=q.id

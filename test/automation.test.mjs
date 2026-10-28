@@ -143,6 +143,9 @@ test("模型错误引用、重复选项、重复题与注入发布字段均不�
     assert.throws(() => validateGenerated({ questions: [{ ...rawQuestion(), ...change }] }, spans));
   }
   assert.throws(() => validateGenerated({ questions: [rawQuestion(), rawQuestion()] }, spans), /duplicate_question/);
+  assert.throws(() => validateGenerated({ questions: [
+    { ...rawQuestion(), prompt: "这款包包的优点是什么？" }
+  ] }, spans), /low_value_question/);
 });
 test("HTTP适配器即使输出截断或不合格也核算费用，缺usage不当作零成本", async () => {
   const spans = [{ id: "description", text }];

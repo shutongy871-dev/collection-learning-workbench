@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { categoryName, dailyLearningQueue, dayKey, filterItems, growthSeries, validateQuestion } from "../src/learning/domain.mjs";
+import { categoryName, dailyLearningQueue, dailyQuizQueue, dayKey, filterItems, growthSeries, validateQuestion } from "../src/learning/domain.mjs";
+import { learningWeight, lowValueQuestionReason } from "../src/learning/question-policy.mjs";
 import { newCard, previewReview, defaultParameters } from "../src/learning/scheduler.mjs";
 import { emptyState, importCollections, retainDouyinState } from "../src/learning/import.mjs";
 import { startLearningServer } from "../src/learning/server.mjs";
@@ -67,12 +68,56 @@ test("每日学习队列按视频限额，已完成视频占用当天名额且�
   const questions = items.map((item, index) => ({ ...question, id: `q-${index + 1}`, itemKey: item.key }));
   const progress = Object.fromEntries(items.map(item => [item.key, { dueAt: now.toISOString() }]));
   const cards = Object.fromEntries(questions.map(q => [q.id, { card: { due: now.toISOString() } }]));
-  assert.deepEqual(dailyLearningQueue(items, progress, questions, cards, [], 2, now).map(i => i.key),
-    ["douyin:a:1", "douyin:a:2"]);
-  cards["q-1"].card.due = "2026-10-21T02:00:00Z";
-  const events = [{ itemKey: "douyin:a:1", at: now.toISOString() }];
+  const selected = dailyLearningQueue(items, progress, questions, cards, [], 2, now);
+  assert.equal(selected.length, 2);
+  assert.deepEqual(dailyLearningQueue(items, progress, questions, cards, [], 2, now), selected);
+  cards[questions.find(q => q.itemKey === selected[0].key).id].card.due = "2026-10-21T02:00:00Z";
+  const events = [{ itemKey: selected[0].key, at: now.toISOString() }];
   assert.deepEqual(dailyLearningQueue(items, progress, questions, cards, events, 2, now).map(i => i.key),
-    ["douyin:a:2"]);
+    [selected[1].key]);
+});
+
+test("穿搭降权、商品细节题过滤；保留可复用的搭配判断题", () => {
+  assert.equal(learningWeight({ categories: ["穿搭"] }), .25);
+  assert.equal(learningWeight(sample), 1);
+  for (const prompt of ["说话者对这款包包的评价是什么？", "这款包包在包型设计上有什么特点？",
+    "原文中如何描述包包的触感？", "关于包包的收纳能力，原文怎么说？",
+    "原文如何评价包包的搭配效果？", "清单把相机包的特点概括成什么？"]) {
+    assert.equal(lowValueQuestionReason({ prompt }), "product_detail_recall");
+  }
+  assert.equal(lowValueQuestionReason({ prompt: "如何选择通勤包包，判断收纳能力要考虑什么？" }), null);
+  const now = new Date("2026-10-20T02:00:00Z"), q = { ...question, prompt: "这款包包的优点是什么？" };
+  assert.deepEqual(dailyQuizQueue([sample], { [sample.key]: {} }, [q],
+    { [q.id]: newCard(q, now) }, [], 5, now), []);
+});
+
+test("每日种子跨视频交错，刷新和连续答题保持队列；穿搭降低实际出现频率", () => {
+  const now = new Date("2026-10-20T02:00:00Z");
+  const items = Array.from({ length: 40 }, (_, n) => ({
+    ...sample, key: `video-${n}`, categories: n < 20 ? ["摄影与修图"] : ["穿搭"]
+  }));
+  const questions = items.flatMap(item => Array.from({ length: 5 }, (_, n) => ({
+    ...question, id: `${item.key}-q-${n}`, itemKey: item.key
+  })));
+  const cards = Object.fromEntries(questions.map(q => [q.id, newCard(q, "2026-01-01")]));
+  const progress = Object.fromEntries(items.map(item => [item.key, {}]));
+  const queue = dailyQuizQueue(items, progress, questions, cards, [], 5, now);
+  assert.equal(queue.length, 25);
+  assert.deepEqual(dailyQuizQueue(items, progress, questions, cards, [], 5, now), queue);
+  assert.ok(queue.every((q, n) => !n || q.itemKey !== queue[n - 1].itemKey));
+  assert.notDeepEqual(dailyQuizQueue(items, progress, questions, cards, [], 5,
+    new Date("2026-10-21T02:00:00Z")), queue);
+  const [first, ...remaining] = queue;
+  cards[first.id].card.due = "2026-10-21T02:00:00Z";
+  assert.deepEqual(dailyQuizQueue(items, progress, questions, cards,
+    [{ questionId: first.id, itemKey: first.itemKey, at: now.toISOString() }], 5, now), remaining);
+  let fashion = 0;
+  for (let day = 1; day <= 200; day++) {
+    const at = new Date(Date.parse("2026-01-01") + day * 86400000);
+    fashion += dailyLearningQueue(items, progress, questions, cards, [], 5, at)
+      .filter(item => item.categories.includes("穿搭")).length;
+  }
+  assert.ok(fashion > 100 && fashion < 350, `fashion slots: ${fashion}/1000`);
 });
 
 async function temp(t) {

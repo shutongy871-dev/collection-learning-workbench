@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { importCollections } from "./import.mjs";
-import { dailyLearningQueue, dayKey, dueQuestions, validateQuestion } from "./domain.mjs";
+import { dailyQuizQueue, dayKey, validateQuestion } from "./domain.mjs";
 import { routeContent } from "../understanding/route.mjs";
 import { latestContent, publicContent } from "../understanding/pipeline.mjs";
 import { learningStore } from "./store.mjs";
@@ -76,9 +76,8 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
     return result;
   };
   const publicState = state => {
-    const dailyItems = dailyLearningQueue(state.items, state.progress, state.questions, state.cards, state.events,
+    const dailyQuestions = dailyQuizQueue(state.items, state.progress, state.questions, state.cards, state.events,
       state.learningConfig.dailyVideos);
-    const keys = new Set(dailyItems.map(item => item.key));
     const today = dayKey(Date.now());
     return {
       ...state, attempts: undefined, drafts: undefined, migration: undefined,
@@ -86,11 +85,11 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
         .reduce((counts, d) => ({ ...counts, [d.itemKey]: (counts[d.itemKey] ?? 0) + 1 }), {}),
       questions: state.questions.map(({ id, itemKey, prompt, options, origin }) => ({ id, itemKey, prompt, options, origin })),
       today: {
-        itemKeys: dailyItems.map(item => item.key),
+        itemKeys: [...new Set(dailyQuestions.map(q => q.itemKey))],
+        questionIds: dailyQuestions.map(q => q.id),
         videoLimit: state.learningConfig.dailyVideos,
         completedVideos: new Set(state.events.filter(e => dayKey(e.at) === today).map(e => e.itemKey)).size,
-        dueQuestions: dueQuestions(state.items.filter(item => keys.has(item.key)), state.progress,
-          state.questions, state.cards).length
+        dueQuestions: dailyQuestions.length
       }
     };
   };
@@ -218,6 +217,9 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
             const record = s.cards[q.id];
             if (!s.progress[item.key] || Date.parse(record.card.due) > Date.now())
               throw error("这道题尚未到复习时间，请返回今日学习", 409);
+            if (!dailyQuizQueue(s.items, s.progress, s.questions, s.cards, s.events,
+              s.learningConfig.dailyVideos).some(candidate => candidate.id === q.id))
+              throw error("这道题不在今日学习队列中，请返回今日学习", 409);
             validateQuestion(q, q.origin === "generated" ? q.sourceSpans.map(s => s.text).join("\n") :
               `${item.description}\n${s.excerpts[item.key] ?? ""}`);
             const pending = Object.values(s.attempts).find(a => a.questionId === q.id && !a.completed &&
@@ -258,7 +260,8 @@ export async function startLearningServer({ dataDir = join(here, "../../.data"),
         return json(res, 200, result);
       }
       const assets = { "/": ["public/index.html", "text/html"], "/app.mjs": ["public/app.mjs", "text/javascript"],
-        "/style.css": ["public/style.css", "text/css"], "/domain.mjs": ["domain.mjs", "text/javascript"] };
+        "/style.css": ["public/style.css", "text/css"], "/domain.mjs": ["domain.mjs", "text/javascript"],
+        "/question-policy.mjs": ["question-policy.mjs", "text/javascript"] };
       const asset = assets[url.pathname];
       if (req.method !== "GET" || !asset) throw error("页面不存在", 404);
       const content = await readFile(join(here, asset[0]));
